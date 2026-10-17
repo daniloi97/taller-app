@@ -1,0 +1,2061 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f172a">
+<title>Taller · Historia Clínica Vehicular</title>
+<style>
+/* ============================================================
+   Tokens
+   ============================================================ */
+:root{
+  --bg:#f4f6fb;
+  --panel:#ffffff;
+  --panel-2:#f8fafc;
+  --ink:#0f172a;
+  --ink-2:#334155;
+  --muted:#64748b;
+  --line:#e2e8f0;
+  --line-2:#cbd5e1;
+  --brand:#2563eb;
+  --brand-dk:#1d4ed8;
+  --brand-soft:#eff6ff;
+  --ok:#047857;
+  --ok-bg:#ecfdf5;
+  --ok-line:#a7f3d0;
+  --warn:#b45309;
+  --warn-bg:#fffbeb;
+  --warn-line:#fde68a;
+  --danger:#dc2626;
+  --danger-bg:#fef2f2;
+  --radius:16px;
+  --radius-sm:10px;
+  --shadow:0 1px 2px rgba(15,23,42,.06), 0 10px 28px -14px rgba(15,23,42,.28);
+  --shadow-sm:0 1px 2px rgba(15,23,42,.06), 0 4px 12px -8px rgba(15,23,42,.25);
+  --header-h:64px;
+}
+
+/* ============================================================
+   Reset
+   ============================================================ */
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  background:var(--bg);color:var(--ink);
+  font-size:16px;line-height:1.45;
+  -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
+}
+img,svg,video{display:block;max-width:100%}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer;border:0;background:none}
+h1,h2,h3,h4,p{margin:0}
+ul{margin:0;padding:0;list-style:none}
+a{color:var(--brand);text-decoration:none}
+:focus-visible{outline:2px solid var(--brand);outline-offset:2px;border-radius:6px}
+.sr{position:absolute!important;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+/* ============================================================
+   Layout
+   ============================================================ */
+.app{min-height:100vh;display:flex;flex-direction:column}
+.wrap{width:100%;max-width:920px;margin:0 auto;padding:0 14px}
+main{flex:1;padding-bottom:64px}
+
+.topbar{
+  position:sticky;top:0;z-index:40;
+  background:linear-gradient(180deg,#0f172a 0%,#15223c 100%);
+  color:#fff;
+  border-bottom:1px solid #0b1220;
+  padding:10px 0 14px;
+  box-shadow:0 6px 24px -14px rgba(2,6,23,.9);
+}
+.brandbar{display:flex;align-items:center;gap:10px;padding-bottom:10px}
+.brand-home{
+  display:flex;align-items:center;gap:10px;min-width:0;
+  padding:4px 8px 4px 4px;border-radius:12px;text-align:left;
+  color:inherit;border:1px solid transparent;
+  transition:background .15s ease,border-color .15s ease;
+}
+.brand-home:hover{background:rgba(255,255,255,.09);border-color:rgba(255,255,255,.12)}
+.brand-home:active{transform:translateY(1px)}
+.brand-logo{
+  width:36px;height:36px;border-radius:11px;flex:none;
+  display:grid;place-items:center;
+  background:linear-gradient(140deg,#3b82f6,#1e40af);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.35);
+}
+.brand-logo svg{width:20px;height:20px}
+.brand-txt{display:flex;flex-direction:column;line-height:1.15;min-width:0}
+.brand-txt strong{font-size:15px;letter-spacing:.2px}
+.brand-txt span{font-size:11.5px;color:#93a4c4}
+.topbar-actions{margin-left:auto;display:flex;gap:8px}
+.tb-btn{
+  display:inline-flex;align-items:center;gap:6px;
+  padding:8px 11px;border-radius:10px;
+  background:rgba(255,255,255,.09);
+  border:1px solid rgba(255,255,255,.14);
+  color:#e6edf9;font-size:12.5px;font-weight:600;
+  transition:background .15s ease,transform .1s ease;
+}
+.tb-btn:hover{background:rgba(255,255,255,.17)}
+.tb-btn:active{transform:translateY(1px)}
+.tb-btn svg{width:15px;height:15px}
+
+/* Buscador */
+.searchbox{
+  display:flex;gap:8px;align-items:stretch;
+  background:#fff;border-radius:14px;padding:6px;
+  box-shadow:var(--shadow);
+}
+.searchbox .field{flex:1;display:flex;align-items:center;gap:8px;min-width:0;padding-left:10px}
+.searchbox .field > svg{width:18px;height:18px;color:var(--muted);flex:none}
+#q{
+  flex:1;min-width:0;border:0;background:transparent;
+  padding:12px 4px;font-size:16px;letter-spacing:.3px;
+  color:var(--ink);caret-color:var(--brand);
+}
+#q::placeholder{color:#94a3b8;letter-spacing:0}
+#q:focus{outline:none}
+.icon-btn{
+  width:46px;height:46px;flex:none;border-radius:11px;
+  display:grid;place-items:center;
+  background:var(--panel-2);border:1px solid var(--line);
+  color:var(--ink-2);transition:background .15s ease,color .15s ease;
+}
+.icon-btn:hover{background:#eef2f8;color:var(--brand)}
+.icon-btn svg{width:21px;height:21px}
+.btn-search{
+  flex:none;padding:0 16px;border-radius:11px;
+  background:var(--brand);color:#fff;font-weight:700;font-size:14px;
+  display:inline-flex;align-items:center;gap:7px;
+  box-shadow:0 6px 16px -8px rgba(37,99,235,.9);
+  transition:background .15s ease;
+}
+.btn-search:hover{background:var(--brand-dk)}
+.btn-search svg{width:17px;height:17px}
+.btn-search span{display:none}
+
+/* Chips */
+.chips{display:flex;gap:7px;margin-top:11px;flex-wrap:wrap;align-items:center}
+.chips .lbl{font-size:11.5px;color:#8fa2c4;text-transform:uppercase;letter-spacing:.6px;font-weight:700;margin-right:2px}
+.chip{
+  padding:6px 12px;border-radius:999px;font-size:12.5px;font-weight:600;
+  background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.16);color:#c9d6ec;
+  transition:all .15s ease;
+}
+.chip:hover{background:rgba(255,255,255,.16)}
+.chip.active{background:#fff;color:#0f172a;border-color:#fff}
+
+/* ============================================================
+   Componentes genéricos
+   ============================================================ */
+.card{
+  background:var(--panel);border:1px solid var(--line);
+  border-radius:var(--radius);box-shadow:var(--shadow-sm);
+  overflow:hidden;
+}
+.card + .card{margin-top:12px}
+.card-pad{padding:16px}
+.section{margin-top:22px}
+.sec-head{display:flex;align-items:center;gap:9px;margin:0 0 10px}
+.sec-head h2{font-size:14px;text-transform:uppercase;letter-spacing:.7px;color:var(--muted)}
+.count{
+  font-size:11.5px;font-weight:700;padding:2px 8px;border-radius:999px;
+  background:var(--brand-soft);color:var(--brand);border:1px solid #dbeafe;
+}
+.count.gray{background:#f1f5f9;color:var(--muted);border-color:var(--line)}
+
+.muted{color:var(--muted)}
+.small{font-size:12.5px}
+.xsmall{font-size:11.5px}
+.mono{font-variant-numeric:tabular-nums;letter-spacing:.4px}
+.strong{font-weight:700}
+.center{text-align:center}
+.row{display:flex;gap:10px;align-items:center}
+.row.between{justify-content:space-between}
+.row.wrap{flex-wrap:wrap}
+.grid-2{display:grid;grid-template-columns:1fr;gap:10px}
+.mt6{margin-top:6px}.mt10{margin-top:10px}.mt14{margin-top:14px}.mt18{margin-top:18px}
+
+.badge{
+  display:inline-flex;align-items:center;gap:5px;
+  font-size:11.5px;font-weight:700;padding:3px 9px;border-radius:999px;
+  border:1px solid var(--line);background:#f8fafc;color:var(--muted);white-space:nowrap;
+}
+.badge svg{width:12px;height:12px}
+.badge.ok{background:var(--ok-bg);color:var(--ok);border-color:var(--ok-line)}
+.badge.off{background:#f1f5f9;color:#475569;border-color:var(--line-2)}
+.badge.warn{background:var(--warn-bg);color:var(--warn);border-color:var(--warn-line)}
+
+.plate{
+  display:inline-block;font-weight:800;letter-spacing:1.5px;
+  font-size:15px;padding:4px 10px;border-radius:7px;
+  background:#0f172a;color:#fff;font-variant-numeric:tabular-nums;
+}
+.plate.lg{font-size:22px;padding:7px 14px;letter-spacing:2.5px;border-radius:10px}
+
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:8px;
+  padding:11px 16px;border-radius:11px;font-weight:650;font-size:14px;
+  border:1px solid var(--line-2);background:#fff;color:var(--ink-2);
+  transition:background .15s ease,border-color .15s ease,transform .1s ease;
+}
+.btn:hover{background:#f8fafc;border-color:#94a3b8}
+.btn:active{transform:translateY(1px)}
+.btn svg{width:17px;height:17px}
+.btn.primary{background:var(--brand);border-color:var(--brand);color:#fff;box-shadow:0 6px 16px -9px rgba(37,99,235,.95)}
+.btn.primary:hover{background:var(--brand-dk);border-color:var(--brand-dk)}
+.btn.ok{background:var(--ok);border-color:var(--ok);color:#fff}
+.btn.ok:hover{background:#036147}
+.btn.ghost{background:transparent;border-color:transparent;color:var(--brand);padding:8px 10px}
+.btn.ghost:hover{background:var(--brand-soft)}
+.btn.danger{color:var(--danger);border-color:#fecaca;background:var(--danger-bg)}
+.btn.danger:hover{background:#fee2e2}
+.btn.danger-solid{background:var(--danger);border-color:var(--danger);color:#fff;box-shadow:0 6px 16px -9px rgba(220,38,38,.95)}
+.btn.danger-solid:hover{background:#b91c1c;border-color:#b91c1c}
+.btn.full{width:100%}
+.btn.sm{padding:8px 12px;font-size:13px;border-radius:9px}
+.btn.block{width:100%}
+
+/* ============================================================
+   Ficha de cliente / vehículo
+   ============================================================ */
+.entity-hd{
+  background:linear-gradient(160deg,#0f172a,#1e3a68);
+  color:#fff;padding:18px 16px;position:relative;overflow:hidden;
+}
+.entity-hd::after{
+  content:"";position:absolute;right:-50px;top:-60px;width:180px;height:180px;
+  border-radius:50%;background:radial-gradient(circle,rgba(59,130,246,.45),transparent 68%);
+}
+.entity-hd .eh-row{display:flex;gap:14px;align-items:center;position:relative;z-index:1;flex-wrap:wrap}
+.avatar{
+  width:54px;height:54px;border-radius:15px;flex:none;
+  display:grid;place-items:center;font-weight:800;font-size:19px;
+  background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.24);color:#fff;
+}
+.avatar svg{width:26px;height:26px}
+.entity-hd h2{font-size:19px;line-height:1.2}
+.entity-hd .sub{font-size:12.5px;color:#a9bcd9;margin-top:3px}
+.hd-meta{
+  display:flex;flex-wrap:wrap;gap:8px;margin-top:14px;position:relative;z-index:1;
+}
+.meta-pill{
+  display:inline-flex;align-items:center;gap:7px;
+  background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.16);
+  padding:7px 11px;border-radius:10px;font-size:12.5px;color:#e8eefb;
+}
+.meta-pill svg{width:14px;height:14px;color:#93b4e8;flex:none}
+.meta-pill b{font-weight:650}
+.meta-pill.warn{background:rgba(251,191,36,.16);border-color:rgba(251,191,36,.4);color:#fde68a}
+.meta-pill.warn svg{color:#fbbf24}
+.hd-btn{
+  width:38px;height:38px;border-radius:11px;flex:none;
+  display:grid;place-items:center;position:relative;z-index:1;
+  background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.18);
+  color:#fca5a5;transition:background .15s ease,color .15s ease;
+}
+.hd-btn:hover{background:rgba(239,68,68,.32);color:#fff}
+.hd-btn svg{width:17px;height:17px}
+
+/* Tarjeta vehículo */
+.veh{
+  display:flex;gap:13px;padding:14px;
+  border-bottom:1px solid var(--line);
+  align-items:flex-start;
+}
+.veh:last-child{border-bottom:0}
+.veh-ico{
+  width:44px;height:44px;border-radius:12px;flex:none;display:grid;place-items:center;
+  background:var(--brand-soft);color:var(--brand);border:1px solid #dbeafe;
+}
+.veh-ico svg{width:23px;height:23px}
+.veh.off .veh-ico{background:#f1f5f9;color:#64748b;border-color:var(--line)}
+.veh-body{flex:1;min-width:0}
+.veh-title{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.veh-title strong{font-size:14.5px}
+.veh-sub{font-size:12.5px;color:var(--muted);margin-top:4px}
+.veh-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:11px}
+
+/* ============================================================
+   Tabs
+   ============================================================ */
+.tabs{
+  display:flex;gap:4px;background:var(--panel-2);
+  border-bottom:1px solid var(--line);padding:6px;overflow-x:auto;
+  -webkit-overflow-scrolling:touch;scrollbar-width:none;
+}
+.tabs::-webkit-scrollbar{display:none}
+.tab{
+  flex:1 0 auto;white-space:nowrap;
+  padding:9px 13px;border-radius:9px;font-size:13px;font-weight:600;color:var(--muted);
+  transition:background .15s ease,color .15s ease;
+}
+.tab:hover{background:#eef2f8;color:var(--ink-2)}
+.tab.active{background:#fff;color:var(--brand);box-shadow:var(--shadow-sm)}
+.tabpanel{padding:16px;display:none}
+.tabpanel.active{display:block}
+
+/* ============================================================
+   Timeline servicios
+   ============================================================ */
+.tl{position:relative;padding-left:22px}
+.tl::before{content:"";position:absolute;left:6px;top:6px;bottom:6px;width:2px;background:var(--line)}
+.tl-item{position:relative;padding-bottom:18px}
+.tl-item:last-child{padding-bottom:0}
+.tl-item::before{
+  content:"";position:absolute;left:-22px;top:5px;width:14px;height:14px;border-radius:50%;
+  background:#fff;border:3px solid var(--brand);box-sizing:border-box;
+}
+.tl-hd{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap}
+.tl-hd time{font-size:13px;font-weight:700}
+.tl-hd .km{font-size:11.5px;color:var(--muted)}
+.tl-body{background:var(--panel-2);border:1px solid var(--line);border-radius:12px;padding:11px 12px;margin-top:7px}
+.tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:2px}
+.tag{
+  font-size:11.5px;padding:3px 9px;border-radius:999px;
+  background:#fff;border:1px solid var(--line);color:var(--ink-2);
+}
+.tag.rep{background:#f5f3ff;border-color:#ddd6fe;color:#6d28d9}
+.tl-foot{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:10px;padding-top:9px;border-top:1px dashed var(--line-2)}
+.tl-cost{font-weight:800;font-size:15px}
+
+/* KV rows */
+.kv{display:flex;justify-content:space-between;gap:14px;padding:11px 0;border-bottom:1px dashed var(--line)}
+.kv:last-child{border-bottom:0}
+.kv dt{font-size:12.5px;color:var(--muted);flex:none}
+.kv dd{margin:0;font-size:14px;font-weight:600;text-align:right;word-break:break-word}
+
+/* Dueños */
+.owner{
+  display:flex;gap:12px;align-items:flex-start;
+  padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--panel-2);
+}
+.owner + .owner{margin-top:9px}
+.owner .avatar{width:38px;height:38px;border-radius:11px;font-size:14px;background:#fff;color:var(--brand);border:1px solid var(--line)}
+.owner .avatar svg{width:18px;height:18px}
+
+/* Empty state */
+.empty{padding:34px 20px;text-align:center;color:var(--muted)}
+.empty svg{width:46px;height:46px;margin:0 auto 12px;color:#cbd5e1}
+.empty h3{font-size:15.5px;color:var(--ink-2);margin-bottom:5px}
+.empty p{font-size:13.5px;max-width:44ch;margin:0 auto}
+.hints{display:grid;grid-template-columns:1fr;gap:10px;margin-top:18px;text-align:left}
+.hint{
+  display:flex;gap:11px;align-items:flex-start;background:var(--panel);
+  border:1px solid var(--line);border-radius:13px;padding:13px;
+}
+.hint .n{
+  width:26px;height:26px;flex:none;border-radius:8px;display:grid;place-items:center;
+  background:var(--brand-soft);color:var(--brand);font-weight:800;font-size:12.5px;
+}
+.hint p{font-size:13px;color:var(--ink-2)}
+.hint code{background:#f1f5f9;padding:1px 6px;border-radius:5px;font-size:12px;letter-spacing:.6px}
+
+/* ============================================================
+   Formularios
+   ============================================================ */
+.form-grid{display:grid;grid-template-columns:1fr;gap:12px}
+.fieldset{border:0;padding:0;margin:0}
+.fieldset legend{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);padding:0 0 8px}
+label.lb{display:block;font-size:12.5px;font-weight:650;color:var(--ink-2);margin-bottom:5px}
+.inp,select.inp,textarea.inp{
+  width:100%;padding:11px 12px;border-radius:10px;
+  border:1px solid var(--line-2);background:#fff;
+  font-size:15px;transition:border-color .15s ease,box-shadow .15s ease;
+}
+.inp:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px rgba(37,99,235,.14)}
+textarea.inp{resize:vertical;min-height:74px}
+select.inp{appearance:none;background-image:linear-gradient(45deg,transparent 50%,#64748b 50%),linear-gradient(135deg,#64748b 50%,transparent 50%);background-position:calc(100% - 17px) 19px,calc(100% - 12px) 19px;background-size:5px 5px,5px 5px;background-repeat:no-repeat;padding-right:34px}
+.checks{display:flex;flex-wrap:wrap;gap:8px}
+.check{
+  display:inline-flex;align-items:center;gap:7px;
+  border:1px solid var(--line-2);background:#fff;border-radius:999px;
+  padding:7px 12px;font-size:13px;cursor:pointer;user-select:none;
+}
+.check input{accent-color:var(--brand);width:15px;height:15px}
+.check:has(input:checked){border-color:var(--brand);background:var(--brand-soft);color:var(--brand-dk);font-weight:600}
+.switch-row{
+  display:flex;gap:11px;align-items:flex-start;
+  border:1px solid var(--line-2);background:var(--panel-2);
+  border-radius:12px;padding:12px;cursor:pointer;margin-bottom:14px;
+  transition:border-color .15s ease,background .15s ease;
+}
+.switch-row input{width:18px;height:18px;accent-color:var(--brand);margin-top:2px;flex:none}
+.switch-row b{display:block;font-size:13.5px}
+.switch-row small{display:block;font-size:12px;color:var(--muted);margin-top:2px}
+.switch-row:has(input:checked){border-color:var(--brand);background:var(--brand-soft)}
+.switch-row:has(input:checked) b{color:var(--brand-dk)}
+.rep-row{display:grid;grid-template-columns:1fr 62px 96px 34px;gap:6px;align-items:center}
+.rep-row .inp{padding:9px 10px;font-size:14px}
+.icon-del{
+  width:34px;height:34px;border-radius:9px;display:grid;place-items:center;
+  background:var(--danger-bg);color:var(--danger);border:1px solid #fecaca;
+}
+.icon-del svg{width:15px;height:15px}
+.total-bar{
+  display:flex;justify-content:space-between;align-items:center;
+  background:#0f172a;color:#fff;border-radius:12px;padding:13px 15px;margin-top:14px;
+}
+.total-bar span{font-size:12.5px;color:#a9bcd9;text-transform:uppercase;letter-spacing:.6px;font-weight:700}
+.total-bar b{font-size:20px;font-variant-numeric:tabular-nums}
+.alert{
+  display:flex;gap:10px;align-items:flex-start;
+  border:1px solid var(--warn-line);background:var(--warn-bg);color:#92400e;
+  border-radius:12px;padding:11px 13px;font-size:13px;
+}
+.alert svg{width:17px;height:17px;flex:none;margin-top:1px}
+.alert.brand{border-color:#dbeafe;background:var(--brand-soft);color:#1e40af}
+.alert.brand svg{color:var(--brand)}
+
+/* ============================================================
+   Modal / Sheet
+   ============================================================ */
+.backdrop{
+  position:fixed;inset:0;z-index:80;
+  background:rgba(8,15,30,.55);backdrop-filter:blur(3px);
+  display:flex;align-items:flex-end;justify-content:center;
+  padding:0;opacity:0;visibility:hidden;transition:opacity .2s ease,visibility .2s ease;
+}
+.backdrop.open{opacity:1;visibility:visible}
+.sheet{
+  background:var(--panel);width:100%;max-width:640px;max-height:92vh;
+  border-radius:20px 20px 0 0;display:flex;flex-direction:column;
+  transform:translateY(18px);transition:transform .22s cubic-bezier(.2,.8,.3,1);
+  box-shadow:0 -12px 40px -12px rgba(2,6,23,.5);
+}
+.backdrop.open .sheet{transform:translateY(0)}
+.sheet-hd{
+  display:flex;align-items:center;gap:12px;
+  padding:15px 16px;border-bottom:1px solid var(--line);flex:none;
+}
+.sheet-hd h3{font-size:16px;flex:1}
+.sheet-hd .sub{font-size:12px;color:var(--muted);margin-top:2px}
+.sheet-x{
+  width:38px;height:38px;border-radius:10px;display:grid;place-items:center;flex:none;
+  background:var(--panel-2);border:1px solid var(--line);color:var(--muted);
+}
+.sheet-x:hover{background:#eef2f8;color:var(--ink)}
+.sheet-x svg{width:18px;height:18px}
+.sheet-bd{padding:16px;overflow-y:auto;flex:1}
+.sheet-ft{
+  padding:13px 16px;border-top:1px solid var(--line);flex:none;
+  display:flex;gap:9px;background:var(--panel-2);
+  padding-bottom:calc(13px + env(safe-area-inset-bottom));
+}
+.sheet-ft .btn{flex:1}
+.grabber{width:38px;height:4px;border-radius:99px;background:var(--line-2);margin:8px auto 0}
+
+/* Scanner */
+.scan-stage{
+  position:relative;background:#020617;border-radius:14px;overflow:hidden;
+  aspect-ratio:4/3;display:grid;place-items:center;
+}
+.scan-stage video{width:100%;height:100%;object-fit:cover}
+.scan-frame{
+  position:absolute;inset:16%;border-radius:14px;
+  border:2px solid rgba(255,255,255,.65);
+  box-shadow:0 0 0 9999px rgba(2,6,23,.42);
+}
+.scan-frame::before,.scan-frame::after{
+  content:"";position:absolute;left:0;right:0;height:2px;background:#38bdf8;
+  animation:scanline 2s ease-in-out infinite;
+}
+@keyframes scanline{0%,100%{top:2%;opacity:.25}50%{top:97%;opacity:1}}
+.scan-msg{
+  position:absolute;left:0;right:0;bottom:0;padding:10px 12px;
+  background:linear-gradient(0deg,rgba(2,6,23,.9),transparent);
+  color:#e2e8f0;font-size:12.5px;text-align:center;
+}
+
+/* Toast */
+.toasts{
+  position:fixed;left:0;right:0;bottom:0;z-index:120;
+  display:flex;flex-direction:column;align-items:center;gap:8px;
+  padding:0 14px calc(18px + env(safe-area-inset-bottom));
+  pointer-events:none;
+}
+.toast{
+  max-width:520px;width:100%;
+  display:flex;align-items:center;gap:10px;
+  background:#0f172a;color:#fff;border-radius:12px;
+  padding:12px 14px;font-size:13.5px;box-shadow:var(--shadow);
+  animation:toastin .22s ease;
+}
+.toast svg{width:17px;height:17px;flex:none;color:#4ade80}
+.toast.err svg{color:#f87171}
+@keyframes toastin{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+
+/* Animaciones */
+.fade-in{animation:fadein .26s ease}
+@keyframes fadein{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:none}}
+
+/* ============================================================
+   Breakpoints
+   ============================================================ */
+@media (min-width:560px){
+  .btn-search span{display:inline}
+  .grid-2{grid-template-columns:1fr 1fr}
+  .hints{grid-template-columns:1fr 1fr 1fr}
+  .form-grid{grid-template-columns:1fr 1fr}
+  .form-grid .span-2{grid-column:1 / -1}
+}
+@media (min-width:720px){
+  .wrap{padding:0 20px}
+  .backdrop{align-items:center;padding:24px}
+  .sheet{border-radius:20px;max-height:88vh}
+  .sheet-ft{padding-bottom:13px}
+  .grabber{display:none}
+  .entity-hd{padding:22px 20px}
+  .tabpanel{padding:20px}
+  .card-pad{padding:20px}
+}
+@media (prefers-reduced-motion:reduce){
+  *{animation-duration:.001ms!important;transition-duration:.001ms!important}
+}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ================= HEADER / BUSCADOR ================= -->
+  <header class="topbar">
+    <div class="wrap">
+      <div class="brandbar">
+        <button type="button" class="brand-home" data-act="home" title="Volver al inicio" aria-label="Volver al inicio">
+          <span class="brand-logo" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
+            </svg>
+          </span>
+          <span class="brand-txt">
+            <strong>Taller Mecánico</strong>
+            <span>Historia clínica vehicular</span>
+          </span>
+        </button>
+        <div class="topbar-actions">
+          <button class="tb-btn" data-act="nuevo-registro" title="Nuevo registro">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+            <span>Nuevo</span>
+          </button>
+        </div>
+      </div>
+
+      <form class="searchbox" id="searchForm" role="search" autocomplete="off">
+        <div class="field">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          <label class="sr" for="q">Búsqueda</label>
+          <input id="q" type="text" inputmode="text" enterkeyhint="search"
+                 placeholder="Ingrese Patente o DNI del cliente..."
+                 autocapitalize="characters" spellcheck="false">
+        </div>
+        <button type="button" class="icon-btn" data-act="scan" title="Escanear con la cámara" aria-label="Escanear con la cámara">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 8V5.5A2.5 2.5 0 0 1 5.5 3H8M16 3h2.5A2.5 2.5 0 0 1 21 5.5V8M21 16v2.5A2.5 2.5 0 0 1 18.5 21H16M8 21H5.5A2.5 2.5 0 0 1 3 18.5V16"/>
+            <path d="M3.5 12h17"/>
+          </svg>
+        </button>
+        <button type="submit" class="btn-search">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          <span>Buscar</span>
+        </button>
+      </form>
+
+      <div class="chips" role="group" aria-label="Tipo de búsqueda">
+        <span class="lbl">Tipo</span>
+        <button type="button" class="chip active" data-act="chip" data-type="auto">Auto</button>
+        <button type="button" class="chip" data-act="chip" data-type="patente">Patente</button>
+        <button type="button" class="chip" data-act="chip" data-type="dni">DNI</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- ================= RESULTADOS ================= -->
+  <main>
+    <div class="wrap" id="results" aria-live="polite"></div>
+  </main>
+</div>
+
+<!-- ================= MODAL: NUEVA ORDEN DE TRABAJO ================= -->
+<div class="backdrop" id="modal-ot" role="dialog" aria-modal="true" aria-labelledby="ot-title">
+  <div class="sheet">
+    <div class="grabber"></div>
+    <div class="sheet-hd">
+      <div style="flex:1">
+        <h3 id="ot-title">Nueva Orden de Trabajo</h3>
+        <div class="sub" id="ot-sub">Cargá los datos del servicio realizado</div>
+      </div>
+      <button class="sheet-x" data-act="cerrar-modal" aria-label="Cerrar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <form class="sheet-bd" id="otForm">
+      <div class="form-grid">
+        <div class="span-2">
+          <label class="lb" for="ot-vehiculo">Vehículo</label>
+          <select class="inp" id="ot-vehiculo" name="vehiculo" required></select>
+        </div>
+        <div>
+          <label class="lb" for="ot-fecha">Fecha</label>
+          <input class="inp" type="date" id="ot-fecha" name="fecha" required>
+        </div>
+        <div>
+          <label class="lb" for="ot-km">Kilometraje</label>
+          <input class="inp" type="number" id="ot-km" name="km" min="0" step="1" placeholder="Ej. 84500" inputmode="numeric">
+        </div>
+        <div class="span-2">
+          <fieldset class="fieldset">
+            <legend>Tareas realizadas</legend>
+            <div class="checks" id="ot-tareas"></div>
+          </fieldset>
+        </div>
+        <div class="span-2">
+          <fieldset class="fieldset">
+            <legend>Repuestos</legend>
+            <div id="ot-repuestos"></div>
+            <button type="button" class="btn sm mt10" data-act="add-repuesto">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+              Agregar repuesto
+            </button>
+          </fieldset>
+        </div>
+        <div class="span-2">
+          <label class="lb" for="ot-mano">Mano de obra ($)</label>
+          <input class="inp" type="number" id="ot-mano" name="mano" min="0" step="100" value="0" inputmode="numeric">
+        </div>
+        <div class="span-2">
+          <label class="lb" for="ot-obs">Observaciones</label>
+          <textarea class="inp" id="ot-obs" name="obs" placeholder="Diagnóstico, recomendaciones, próximo service..."></textarea>
+        </div>
+      </div>
+      <div class="total-bar">
+        <span>Total estimado</span>
+        <b id="ot-total">$ 0</b>
+      </div>
+    </form>
+    <div class="sheet-ft">
+      <button class="btn" data-act="cerrar-modal">Cancelar</button>
+      <button class="btn primary" data-act="guardar-ot">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+        Guardar orden
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= MODAL: ASOCIAR VEHÍCULO ================= -->
+<div class="backdrop" id="modal-vehiculo" role="dialog" aria-modal="true" aria-labelledby="veh-title">
+  <div class="sheet">
+    <div class="grabber"></div>
+    <div class="sheet-hd">
+      <div style="flex:1">
+        <h3 id="veh-title">Asociar Nuevo Vehículo</h3>
+        <div class="sub" id="veh-sub">Se vinculará al cliente seleccionado</div>
+      </div>
+      <button class="sheet-x" data-act="cerrar-modal" aria-label="Cerrar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <form class="sheet-bd" id="vehForm">
+      <div class="form-grid">
+        <div>
+          <label class="lb" for="v-patente">Patente *</label>
+          <input class="inp mono" id="v-patente" name="patente" required placeholder="AB123CD" autocapitalize="characters" spellcheck="false" maxlength="9">
+        </div>
+        <div>
+          <label class="lb" for="v-anio">Año</label>
+          <input class="inp" id="v-anio" name="anio" type="number" min="1950" max="2099" step="1" placeholder="2021" inputmode="numeric">
+        </div>
+        <div>
+          <label class="lb" for="v-marca">Marca</label>
+          <input class="inp" id="v-marca" name="marca" placeholder="Toyota">
+        </div>
+        <div>
+          <label class="lb" for="v-modelo">Modelo</label>
+          <input class="inp" id="v-modelo" name="modelo" placeholder="Corolla">
+        </div>
+        <div>
+          <label class="lb" for="v-km">Kilometraje actual</label>
+          <input class="inp" id="v-km" name="km" type="number" min="0" step="1" placeholder="84500" inputmode="numeric">
+        </div>
+        <div>
+          <label class="lb" for="v-color">Color</label>
+          <input class="inp" id="v-color" name="color" placeholder="Gris">
+        </div>
+        <div class="span-2">
+          <label class="lb" for="v-motor">N° de motor / chasis (opcional)</label>
+          <input class="inp mono" id="v-motor" name="motor" placeholder="---">
+        </div>
+      </div>
+    </form>
+    <div class="sheet-ft">
+      <button class="btn" data-act="cerrar-modal">Cancelar</button>
+      <button class="btn primary" data-act="guardar-vehiculo">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+        Asociar vehículo
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= MODAL: TRANSFERIR TITULARIDAD ================= -->
+<div class="backdrop" id="modal-transfer" role="dialog" aria-modal="true" aria-labelledby="tr-title">
+  <div class="sheet">
+    <div class="grabber"></div>
+    <div class="sheet-hd">
+      <div style="flex:1">
+        <h3 id="tr-title">Transferir Titularidad</h3>
+        <div class="sub" id="tr-sub">El propietario actual pasará al histórico de dueños</div>
+      </div>
+      <button class="sheet-x" data-act="cerrar-modal" aria-label="Cerrar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <form class="sheet-bd" id="trForm">
+      <label class="switch-row" for="tr-sin-titular">
+        <input type="checkbox" id="tr-sin-titular">
+        <span>
+          <b>Dejar sin titular — “Propietario desconocido”</b>
+          <small>Desafilia el vehículo del cliente: queda activo pero sin titular asociado. El propietario actual pasa al histórico de dueños.</small>
+        </span>
+      </label>
+      <div class="alert">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>
+        <div>Si el DNI coincide con un cliente registrado, se reutiliza su ficha. Si no, se crea un cliente nuevo.</div>
+      </div>
+      <div class="form-grid mt14" id="tr-datos">
+        <div>
+          <label class="lb" for="tr-dni">DNI / CUIT del nuevo titular *</label>
+          <input class="inp mono" id="tr-dni" name="dni" required placeholder="30123456" inputmode="numeric">
+        </div>
+        <div>
+          <label class="lb" for="tr-tel">Teléfono</label>
+          <input class="inp" id="tr-tel" name="telefono" placeholder="11 5555-1234" inputmode="tel">
+        </div>
+        <div class="span-2">
+          <label class="lb" for="tr-nombre">Nombre y apellido *</label>
+          <input class="inp" id="tr-nombre" name="nombre" required placeholder="Juan Pérez">
+        </div>
+        <div class="span-2">
+          <label class="lb" for="tr-fecha">Fecha de transferencia</label>
+          <input class="inp" type="date" id="tr-fecha" name="fecha">
+        </div>
+      </div>
+    </form>
+    <div class="sheet-ft">
+      <button class="btn" data-act="cerrar-modal">Cancelar</button>
+      <button class="btn primary" data-act="guardar-transfer">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12h16M14 6l6 6-6 6"/></svg>
+        Confirmar transferencia
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= MODAL: NUEVO REGISTRO (CLIENTE) ================= -->
+<div class="backdrop" id="modal-cliente" role="dialog" aria-modal="true" aria-labelledby="cl-title">
+  <div class="sheet">
+    <div class="grabber"></div>
+    <div class="sheet-hd">
+      <div style="flex:1">
+        <h3 id="cl-title">Nuevo Registro de Cliente</h3>
+        <div class="sub">Alta rápida para luego agregar vehículos</div>
+      </div>
+      <button class="sheet-x" data-act="cerrar-modal" aria-label="Cerrar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <form class="sheet-bd" id="clForm">
+      <div class="form-grid">
+        <div class="span-2">
+          <label class="lb" for="c-nombre">Nombre y apellido *</label>
+          <input class="inp" id="c-nombre" name="nombre" required placeholder="Juan Pérez">
+        </div>
+        <div>
+          <label class="lb" for="c-dni">DNI / CUIT *</label>
+          <input class="inp mono" id="c-dni" name="dni" required placeholder="30123456" inputmode="numeric">
+        </div>
+        <div>
+          <label class="lb" for="c-tel">Teléfono</label>
+          <input class="inp" id="c-tel" name="telefono" placeholder="11 5555-1234" inputmode="tel">
+        </div>
+        <div class="span-2">
+          <label class="lb" for="c-email">Email</label>
+          <input class="inp" id="c-email" name="email" type="email" placeholder="cliente@mail.com">
+        </div>
+      </div>
+    </form>
+    <div class="sheet-ft">
+      <button class="btn" data-act="cerrar-modal">Cancelar</button>
+      <button class="btn primary" data-act="guardar-cliente">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+        Guardar cliente
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= MODAL: ESCÁNER ================= -->
+<div class="backdrop" id="modal-scan" role="dialog" aria-modal="true" aria-labelledby="sc-title">
+  <div class="sheet">
+    <div class="grabber"></div>
+    <div class="sheet-hd">
+      <div style="flex:1">
+        <h3 id="sc-title">Escanear Patente / Documento</h3>
+        <div class="sub">Apuntá la cámara al código o texto a leer</div>
+      </div>
+      <button class="sheet-x" data-act="cerrar-modal" aria-label="Cerrar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="sheet-bd">
+      <div class="scan-stage">
+        <video id="scan-video" playsinline muted></video>
+        <div class="scan-frame" aria-hidden="true"></div>
+        <div class="scan-msg" id="scan-msg">Iniciando cámara…</div>
+      </div>
+      <div class="alert brand mt14" id="scan-note" hidden>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>
+        <div id="scan-note-txt"></div>
+      </div>
+      <div class="mt14">
+        <label class="lb" for="scan-manual">Lectura manual (si la cámara no está disponible)</label>
+        <div class="row">
+          <input class="inp mono" id="scan-manual" placeholder="AB123CD o 30123456" autocapitalize="characters" spellcheck="false">
+          <button class="btn primary" data-act="usar-manual" style="flex:none">Usar</button>
+        </div>
+      </div>
+    </div>
+    <div class="sheet-ft">
+      <button class="btn" data-act="cerrar-modal">Cerrar</button>
+      <button class="btn ok" data-act="capturar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+        Capturar y leer
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= MODAL: CONFIRMAR ELIMINACIÓN ================= -->
+<div class="backdrop" id="modal-eliminar" role="dialog" aria-modal="true" aria-labelledby="del-title">
+  <div class="sheet">
+    <div class="grabber"></div>
+    <div class="sheet-hd">
+      <div style="flex:1">
+        <h3 id="del-title">Eliminar registro</h3>
+        <div class="sub" id="del-sub">Esta acción no se puede deshacer</div>
+      </div>
+      <button class="sheet-x" data-act="cerrar-modal" aria-label="Cerrar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="sheet-bd">
+      <div class="alert">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>
+        <div id="del-msg"></div>
+      </div>
+    </div>
+    <div class="sheet-ft">
+      <button class="btn" data-act="cerrar-modal">Cancelar</button>
+      <button class="btn danger-solid" data-act="confirmar-eliminar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-14"/></svg>
+        Eliminar definitivamente
+      </button>
+    </div>
+  </div>
+</div>
+
+<div class="toasts" id="toasts" aria-live="polite"></div>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ==========================================================
+     0. Utilidades
+     ========================================================== */
+  var LS_KEY = 'taller_db_v1';
+
+  function $(sel, root) { return (root || document).querySelector(sel); }
+  function $$(sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); }
+  function uid(p) { return p + '_' + Math.random().toString(36).slice(2, 9); }
+
+  function esc(s) {
+    return String(s === null || s === undefined ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+  function money(n) {
+    var v = Number(n) || 0;
+    try {
+      return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(v);
+    } catch (e) { return '$ ' + v.toLocaleString('es-AR'); }
+  }
+  function num(n) { return (Number(n) || 0).toLocaleString('es-AR'); }
+  function fecha(iso) {
+    if (!iso) return '—';
+    var d = new Date(iso + 'T00:00:00');
+    if (isNaN(d)) return iso;
+    try { return d.toLocaleDateString('es-AR', { day: '2-digit', month: 'short', year: 'numeric' }); }
+    catch (e) { return iso; }
+  }
+  function hoy() { return new Date().toISOString().slice(0, 10); }
+  function norm(s) { return String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); }
+  function iniciales(nombre) {
+    return String(nombre || '?').trim().split(/\s+/).slice(0, 2).map(function (w) { return w.charAt(0).toUpperCase(); }).join('');
+  }
+
+  /* Detección automática del tipo de búsqueda */
+  function detectarTipo(raw) {
+    var v = norm(raw);
+    if (!v) return 'auto';
+    if (/^\d{7,8}$/.test(v) || /^\d{11}$/.test(v)) return 'dni';
+    if (/^[A-Z]{2}\d{3}[A-Z]{2}$/.test(v)) return 'patente';   // Mercosur AB123CD
+    if (/^[A-Z]{3}\d{3}$/.test(v)) return 'patente';           // Antigua ABC123
+    if (/^[A-Z]\d{3}[A-Z]{3}$/.test(v)) return 'patente';      // Antigua A123BCD
+    if (/^\d{6}$/.test(v) || /^\d{3}$/.test(v)) return 'patente';
+    if (/[A-Z]/.test(v) && /\d/.test(v)) return 'patente';
+    if (/^\d+$/.test(v)) return 'dni';
+    return 'auto';
+  }
+
+  /* ==========================================================
+     1. "Base de datos" local (seed + persistencia)
+     ========================================================== */
+  var seed = {
+    clientes: [
+      { id: 'cli_1', nombre: 'Juan Carlos Pérez', dni: '30123456', telefono: '11 5555-1234', email: 'juan.perez@mail.com', desde: '2019-04-11' },
+      { id: 'cli_2', nombre: 'María González', dni: '27876543', telefono: '11 4444-9087', email: 'mgonzalez@mail.com', desde: '2020-09-02' },
+      { id: 'cli_3', nombre: 'Roberto Díaz', dni: '20456789', telefono: '351 622-3388', email: '', desde: '2015-02-18' }
+    ],
+    vehiculos: [
+      {
+        id: 'veh_1', patente: 'AB123CD', marca: 'Toyota', modelo: 'Corolla XEI 2.0', anio: 2019,
+        color: 'Gris Plata', km: 128400, clienteId: 'cli_1', estado: 'activo',
+        motor: '2ZR-A118842',
+        duenos: []
+      },
+      {
+        id: 'veh_2', patente: 'LKM447', marca: 'Ford', modelo: 'Fiesta Kinetic', anio: 2011,
+        color: 'Rojo', km: 214000, clienteId: null, estado: 'historico',
+        motor: 'CFN-77120',
+        duenos: [
+          { nombre: 'Juan Carlos Pérez', dni: '30123456', desde: '2012-03-05', hasta: '2021-11-30' },
+          { nombre: 'Roberto Díaz', dni: '20456789', desde: '2021-11-30', hasta: '2024-06-14' }
+        ]
+      },
+      {
+        id: 'veh_3', patente: 'AD998ZZ', marca: 'Volkswagen', modelo: 'Amarok Highline', anio: 2022,
+        color: 'Negro', km: 46300, clienteId: 'cli_2', estado: 'activo',
+        motor: 'DDX-551230',
+        duenos: []
+      },
+      {
+        id: 'veh_4', patente: 'JUV210', marca: 'Renault', modelo: 'Clio Authentique', anio: 2008,
+        color: 'Azul', km: 268900, clienteId: null, estado: 'historico',
+        motor: 'K4M-990211',
+        duenos: [
+          { nombre: 'María González', dni: '27876543', desde: '2013-07-22', hasta: '2022-02-09' }
+        ]
+      },
+      {
+        id: 'veh_5', patente: 'AE451QW', marca: 'Chevrolet', modelo: 'Onix LTZ', anio: 2023,
+        color: 'Blanco', km: 18900, clienteId: 'cli_1', estado: 'activo',
+        motor: 'LXT-330912',
+        duenos: []
+      }
+    ],
+    servicios: [
+      {
+        id: 'srv_1', vehiculoId: 'veh_1', fecha: '2026-08-14', km: 126800, manoObra: 150000,
+        tareas: ['Cambio de aceite y filtro', 'Service 20.000 km'],
+        repuestos: [{ nombre: 'Filtro de aceite', cantidad: 1, precio: 42000 }, { nombre: 'Aceite 5W30 (4L)', cantidad: 1, precio: 96000 }],
+        obs: 'Se recomienda revisar tren delantero en el próximo ingreso.'
+      },
+      {
+        id: 'srv_2', vehiculoId: 'veh_1', fecha: '2026-03-02', km: 119300, manoObra: 98000,
+        tareas: ['Cambio de pastillas de freno', 'Rectificado de discos'],
+        repuestos: [{ nombre: 'Pastillas delanteras', cantidad: 1, precio: 135000 }, { nombre: 'Líquido de frenos', cantidad: 1, precio: 28000 }],
+        obs: ''
+      },
+      {
+        id: 'srv_3', vehiculoId: 'veh_1', fecha: '2025-11-19', km: 111000, manoObra: 60000,
+        tareas: ['Alineación y balanceo'],
+        repuestos: [],
+        obs: 'Se corrigió convergencia.'
+      },
+      {
+        id: 'srv_4', vehiculoId: 'veh_3', fecha: '2026-06-27', km: 44100, manoObra: 210000,
+        tareas: ['Distribución completa', 'Cambio de aceite y filtro'],
+        repuestos: [{ nombre: 'Kit de distribución', cantidad: 1, precio: 480000 }, { nombre: 'Bomba de agua', cantidad: 1, precio: 175000 }],
+        obs: 'Cliente autoriza recambio de bomba de agua.'
+      },
+      {
+        id: 'srv_5', vehiculoId: 'veh_2', fecha: '2020-05-08', km: 198000, manoObra: 45000,
+        tareas: ['Cambio de embrague'],
+        repuestos: [{ nombre: 'Kit de embrague', cantidad: 1, precio: 168000 }],
+        obs: 'Vehículo luego transferido.'
+      },
+      {
+        id: 'srv_6', vehiculoId: 'veh_5', fecha: '2026-09-05', km: 18200, manoObra: 72000,
+        tareas: ['Cambio de aceite y filtro', 'Revisión general'],
+        repuestos: [{ nombre: 'Filtro de aire', cantidad: 1, precio: 31000 }, { nombre: 'Aceite 0W20 (4L)', cantidad: 1, precio: 118000 }],
+        obs: ''
+      }
+    ]
+  };
+
+  var DB = cargar();
+
+  function cargar() {
+    try {
+      var raw = localStorage.getItem(LS_KEY);
+      if (raw) {
+        var d = JSON.parse(raw);
+        if (d && d.clientes && d.vehiculos && d.servicios) return d;
+      }
+    } catch (e) { /* modo incógnito / file:// restringido */ }
+    return JSON.parse(JSON.stringify(seed));
+  }
+  function guardar() {
+    try { localStorage.setItem(LS_KEY, JSON.stringify(DB)); return true; }
+    catch (e) { return false; }
+  }
+
+  /* ==========================================================
+     2. Accesores
+     ========================================================== */
+  function clientePorId(id) { return DB.clientes.filter(function (c) { return c.id === id; })[0] || null; }
+  function clientePorDni(dni) { var d = norm(dni); return DB.clientes.filter(function (c) { return norm(c.dni) === d; })[0] || null; }
+  function vehiculoPorId(id) { return DB.vehiculos.filter(function (v) { return v.id === id; })[0] || null; }
+  function vehiculoPorPatente(p) { var n = norm(p); return DB.vehiculos.filter(function (v) { return norm(v.patente) === n; })[0] || null; }
+  function serviciosDe(vid) {
+    return DB.servicios.filter(function (s) { return s.vehiculoId === vid; })
+      .sort(function (a, b) { return (b.fecha || '').localeCompare(a.fecha || ''); });
+  }
+  function totalServicios(vid) {
+    return serviciosDe(vid).reduce(function (acc, s) {
+      var rep = (s.repuestos || []).reduce(function (a, r) { return a + (Number(r.cantidad) || 0) * (Number(r.precio) || 0); }, 0);
+      return acc + (Number(s.manoObra) || 0) + rep;
+    }, 0);
+  }
+  function nombrePropietario(v) {
+    var c = clientePorId(v.clienteId);
+    if (c) return c.nombre;
+    return 'Propietario desconocido';
+  }
+  /* Último dueño conocido (aunque hoy no sea el titular) */
+  function ultimoDuenoRegistrado(v) {
+    var c = clientePorId(v.clienteId);
+    if (c) return c.nombre;
+    if (v.duenos && v.duenos.length) return v.duenos[v.duenos.length - 1].nombre;
+    return null;
+  }
+
+  /* Vehículos de un cliente: activos + históricos */
+  function vehiculosDeCliente(cli) {
+    var activos = [], historicos = [];
+    DB.vehiculos.forEach(function (v) {
+      var esTitularActual = v.clienteId === cli.id;
+      var fueDueno = (v.duenos || []).some(function (d) { return norm(d.dni) === norm(cli.dni); });
+      if (esTitularActual && v.estado !== 'historico') activos.push(v);
+      else if (esTitularActual && v.estado === 'historico') historicos.push(v);
+      else if (fueDueno) historicos.push(v);
+    });
+    return { activos: activos, historicos: historicos };
+  }
+
+  /* ==========================================================
+     3. Estado de UI
+     ========================================================== */
+  var estado = {
+    tipo: 'auto',          // auto | patente | dni
+    vista: 'inicio',       // inicio | cliente | vehiculo
+    clienteId: null,
+    vehiculoId: null,
+    tab: 'historial',      // historial | propietario | duenos
+    ctx: {}                // contexto de modales
+  };
+
+  var TAREAS_SUGERIDAS = [
+    'Cambio de aceite y filtro', 'Service programado', 'Alineación y balanceo',
+    'Cambio de pastillas de freno', 'Distribución', 'Cambio de embrague',
+    'Batería', 'Neumáticos', 'Revisión general', 'Diagnóstico electrónico'
+  ];
+
+  /* ==========================================================
+     4. Iconos (SVG inline, sin dependencias)
+     ========================================================== */
+  var ICON = {
+    user: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>',
+    car: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 17h14M6 17v2M18 17v2M4.5 12.5 6 7a1.5 1.5 0 0 1 1.4-1h9.2A1.5 1.5 0 0 1 18 7l1.5 5.5"/><path d="M3 12.5h18v4a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/><circle cx="7.5" cy="15" r="1"/><circle cx="16.5" cy="15" r="1"/></svg>',
+    phone: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.3-1.2a2 2 0 0 1 2.1-.5c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2z"/></svg>',
+    id: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2.5"/><circle cx="8.5" cy="11" r="2.2"/><path d="M5 16.5c.7-1.5 2-2.3 3.5-2.3s2.8.8 3.5 2.3M15 9h4M15 13h4"/></svg>',
+    wrench: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>',
+    clock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
+    search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>',
+    swap: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4 3 8l4 4"/><path d="M3 8h13a4 4 0 0 1 0 8h-2"/></svg>',
+    plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
+    check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>',
+    trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-14"/></svg>',
+    alert: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>',
+    info: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>',
+    box: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/></svg>',
+    shield: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v6c0 4.4-3 8.2-7 9-4-.8-7-4.6-7-9V6z"/></svg>'
+  };
+
+  /* ==========================================================
+     5. Render principal
+     ========================================================== */
+  var RESULTS = $('#results');
+
+  function renderInicio() {
+    RESULTS.innerHTML =
+      '<section class="card fade-in">' +
+        '<div class="empty">' +
+          ICON.search +
+          '<h3>Buscá un cliente o un vehículo</h3>' +
+          '<p>Ingresá una <b>patente</b> o un <b>DNI</b> en el buscador. El tipo de búsqueda se detecta automáticamente, o podés forzarlo con los badges superiores.</p>' +
+          '<div class="hints">' +
+            '<div class="hint"><div class="n">1</div><p>Patente Mercosur: <code>AB123CD</code> · antigua: <code>LKM447</code></p></div>' +
+            '<div class="hint"><div class="n">2</div><p>DNI del cliente: <code>30123456</code> (7 u 8 dígitos)</p></div>' +
+            '<div class="hint"><div class="n">3</div><p>O escaneá con la cámara usando el botón <b>QR/scan</b> del buscador</p></div>' +
+          '</div>' +
+          '<div class="row" style="justify-content:center;flex-wrap:wrap;margin-top:16px">' +
+            '<button class="btn" data-act="sin-titular">' + ICON.shield + ' Ver vehículos sin titular</button>' +
+            '<button class="btn" data-act="chip" data-type="patente">' + ICON.car + ' Todos los vehículos</button>' +
+            '<button class="btn" data-act="chip" data-type="dni">' + ICON.user + ' Todos los clientes</button>' +
+          '</div>' +
+        '</div>' +
+      '</section>';
+  }
+
+  function renderSinResultados(q) {
+    RESULTS.innerHTML =
+      '<section class="card fade-in"><div class="empty">' +
+        ICON.alert +
+        '<h3>Sin resultados para “' + esc(q) + '”</h3>' +
+        '<p>No encontramos ningún cliente ni vehículo con ese dato.</p>' +
+        '<div class="row" style="justify-content:center;flex-wrap:wrap;margin-top:16px">' +
+          '<button class="btn primary" data-act="nuevo-registro">' + ICON.plus + ' Registrar cliente</button>' +
+          '<button class="btn" data-act="scan">' + ICON.search + ' Escanear</button>' +
+        '</div>' +
+      '</div></section>';
+  }
+
+  /* ---------- Vista CLIENTE ---------- */
+  function renderCliente(cli) {
+    var r = vehiculosDeCliente(cli);
+    var html = '';
+
+    html +=
+      '<section class="card entity-hd fade-in">' +
+        '<div class="eh-row">' +
+          '<div class="avatar">' + esc(iniciales(cli.nombre)) + '</div>' +
+          '<div style="flex:1;min-width:180px">' +
+            '<h2>' + esc(cli.nombre) + '</h2>' +
+            '<div class="sub">Cliente registrado' + (cli.desde ? ' desde ' + fecha(cli.desde) : '') + '</div>' +
+          '</div>' +
+          '<span class="badge ok" style="background:rgba(255,255,255,.14);border-color:rgba(255,255,255,.24);color:#e8eefb">' +
+            ICON.shield + ' Ficha activa</span>' +
+          '<button type="button" class="hd-btn" data-act="eliminar-registro" data-kind="cliente" data-id="' + esc(cli.id) + '" title="Eliminar cliente" aria-label="Eliminar cliente">' + ICON.trash + '</button>' +
+        '</div>' +
+        '<div class="hd-meta">' +
+          '<span class="meta-pill">' + ICON.id + '<b>' + esc(cli.dni) + '</b></span>' +
+          '<span class="meta-pill">' + ICON.phone + (cli.telefono ? '<b>' + esc(cli.telefono) + '</b>' : 'Sin teléfono') + '</span>' +
+          (cli.email ? '<span class="meta-pill">' + ICON.user + esc(cli.email) + '</span>' : '') +
+          '<span class="meta-pill">' + ICON.car + '<b>' + r.activos.length + '</b> activo(s)</span>' +
+        '</div>' +
+      '</section>';
+
+    /* Vehículos activos */
+    html += '<div class="section">' +
+      '<div class="sec-head"><h2>Vehículos Activos</h2><span class="count">' + r.activos.length + '</span></div>';
+    if (r.activos.length) {
+      html += '<div class="card">' + r.activos.map(vehRow).join('') + '</div>';
+    } else {
+      html += '<div class="card"><div class="empty" style="padding:26px 18px">' + ICON.car +
+        '<h3>Sin vehículos activos</h3><p>Este cliente no tiene vehículos en circulación registrados.</p></div></div>';
+    }
+    html += '</div>';
+
+    /* Historial de vehículos */
+    html += '<div class="section">' +
+      '<div class="sec-head"><h2>Historial de Vehículos Anteriores</h2><span class="count gray">' + r.historicos.length + '</span></div>';
+    if (r.historicos.length) {
+      html += '<div class="card">' + r.historicos.map(function (v) { return vehRow(v, true); }).join('') + '</div>';
+    } else {
+      html += '<div class="card"><div class="empty" style="padding:24px 18px">' + ICON.clock +
+        '<h3>Sin antecedentes</h3><p>No hay vehículos vendidos o transferidos para este cliente.</p></div></div>';
+    }
+    html += '</div>';
+
+    html += '<div class="section">' +
+      '<button class="btn primary full" data-act="nuevo-vehiculo" data-cliente="' + esc(cli.id) + '">' +
+        ICON.plus + ' Asociar Nuevo Vehículo a este Cliente</button>' +
+      '<button class="btn full mt10" data-act="nueva-ot" data-cliente="' + esc(cli.id) + '">' +
+        ICON.wrench + ' Nueva Orden de Trabajo</button>' +
+    '</div>';
+
+    RESULTS.innerHTML = html;
+  }
+
+  function vehRow(v, historico) {
+    var duenoTxt = historico
+      ? 'Histórico · ' + (v.clienteId ? 'titular actual: ' + nombrePropietario(v) : 'sin titular actual')
+      : '';
+    return '<div class="veh ' + (historico ? 'off' : '') + '">' +
+      '<div class="veh-ico">' + ICON.car + '</div>' +
+      '<div class="veh-body">' +
+        '<div class="veh-title">' +
+          '<span class="plate">' + esc(v.patente) + '</span>' +
+          '<strong>' + esc(v.marca) + ' ' + esc(v.modelo) + '</strong>' +
+          (historico
+            ? '<span class="badge off">' + ICON.clock + ' Anterior</span>'
+            : '<span class="badge ok">' + ICON.check + ' Activo</span>') +
+        '</div>' +
+        '<div class="veh-sub">' +
+          'Año ' + esc(v.anio || '—') +
+          (v.color ? ' · ' + esc(v.color) : '') +
+          (v.km ? ' · ' + num(v.km) + ' km' : '') +
+          ' · ' + serviciosDe(v.id).length + ' servicio(s)' +
+          (duenoTxt ? ' · ' + esc(duenoTxt) : '') +
+        '</div>' +
+        '<div class="veh-actions">' +
+          (historico
+            ? '<button class="btn sm" data-act="ver-vehiculo" data-vehiculo="' + esc(v.id) + '">' + ICON.clock + ' Ver historial</button>'
+            : '<button class="btn sm primary" data-act="nueva-ot" data-vehiculo="' + esc(v.id) + '">' + ICON.wrench + ' Seleccionar para servicio</button>' +
+              '<button class="btn sm" data-act="ver-vehiculo" data-vehiculo="' + esc(v.id) + '">' + ICON.search + ' Ver ficha</button>') +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  }
+
+  /* ---------- Vista VEHÍCULO ---------- */
+  function renderVehiculo(v) {
+    var cli = clientePorId(v.clienteId);
+    var svs = serviciosDe(v.id);
+    var html = '';
+
+    html +=
+      '<section class="card entity-hd fade-in">' +
+        '<div class="eh-row">' +
+          '<div class="avatar" style="font-size:13px;letter-spacing:1.4px;font-weight:800">' + esc(v.patente.slice(0, 3)) + '</div>' +
+          '<div style="flex:1;min-width:180px">' +
+            '<span class="plate lg">' + esc(v.patente) + '</span>' +
+            '<h2 style="margin-top:9px">' + esc(v.marca || '—') + ' ' + esc(v.modelo || '') + '</h2>' +
+            '<div class="sub">Año ' + esc(v.anio || '—') + (v.color ? ' · ' + esc(v.color) : '') + '</div>' +
+          '</div>' +
+          (v.estado === 'historico'
+            ? '<span class="badge" style="background:rgba(255,255,255,.14);border-color:rgba(255,255,255,.24);color:#e8eefb">' + ICON.clock + ' Histórico</span>'
+            : '<span class="badge" style="background:rgba(16,185,129,.22);border-color:rgba(16,185,129,.45);color:#d1fae5">' + ICON.check + ' Activo</span>') +
+          '<button type="button" class="hd-btn" data-act="eliminar-registro" data-kind="vehiculo" data-id="' + esc(v.id) + '" title="Eliminar vehículo" aria-label="Eliminar vehículo">' + ICON.trash + '</button>' +
+        '</div>' +
+        '<div class="hd-meta">' +
+          (cli
+            ? '<span class="meta-pill">' + ICON.user + '<b>' + esc(cli.nombre) + '</b></span>'
+            : '<span class="meta-pill warn">' + ICON.user + '<b>Propietario desconocido</b></span>') +
+          '<span class="meta-pill">' + ICON.wrench + '<b>' + svs.length + '</b> servicios</span>' +
+          '<span class="meta-pill">' + ICON.clock + 'Últ. ' + (svs[0] ? fecha(svs[0].fecha) : '—') + '</span>' +
+          (v.km ? '<span class="meta-pill">' + ICON.car + '<b>' + num(v.km) + '</b> km</span>' : '') +
+        '</div>' +
+      '</section>';
+
+    if (cli) {
+      html += '<div class="section"><button class="btn full" data-act="ver-cliente" data-cliente="' + esc(cli.id) + '">' +
+        ICON.user + ' Ver ficha del cliente: ' + esc(cli.nombre) + '</button></div>';
+    }
+
+    /* Tabs */
+    html += '<div class="section"><div class="card">' +
+      '<div class="tabs" role="tablist">' +
+        tabBtn('historial', 'Historial de Servicios', estado.tab) +
+        tabBtn('propietario', 'Propietario Actual', estado.tab) +
+        tabBtn('duenos', 'Histórico de Dueños', estado.tab) +
+      '</div>' +
+      '<div class="tabpanel ' + (estado.tab === 'historial' ? 'active' : '') + '" data-panel="historial">' + panelHistorial(svs) + '</div>' +
+      '<div class="tabpanel ' + (estado.tab === 'propietario' ? 'active' : '') + '" data-panel="propietario">' + panelPropietario(v, cli) + '</div>' +
+      '<div class="tabpanel ' + (estado.tab === 'duenos' ? 'active' : '') + '" data-panel="duenos">' + panelDuenos(v) + '</div>' +
+    '</div></div>';
+
+    RESULTS.innerHTML = html;
+  }
+
+  function tabBtn(key, label, active) {
+    return '<button class="tab ' + (key === active ? 'active' : '') + '" role="tab" data-act="tab" data-tab="' + key + '" ' +
+      'aria-selected="' + (key === active) + '">' + esc(label) + '</button>';
+  }
+
+  function panelHistorial(svs) {
+    if (!svs.length) {
+      return '<div class="empty" style="padding:26px 10px">' + ICON.wrench +
+        '<h3>Sin servicios registrados</h3><p>Todavía no hay órdenes de trabajo para este vehículo.</p></div>';
+    }
+    var total = svs.reduce(function (a, s) {
+      return a + (Number(s.manoObra) || 0) + (s.repuestos || []).reduce(function (x, r) {
+        return x + (Number(r.cantidad) || 0) * (Number(r.precio) || 0);
+      }, 0);
+    }, 0);
+
+    var items = svs.map(function (s) {
+      var rep = (s.repuestos || []).reduce(function (a, r) { return a + (Number(r.cantidad) || 0) * (Number(r.precio) || 0); }, 0);
+      var costo = (Number(s.manoObra) || 0) + rep;
+      return '<div class="tl-item">' +
+        '<div class="tl-hd"><time>' + fecha(s.fecha) + '</time>' +
+          (s.km ? '<span class="km">' + num(s.km) + ' km</span>' : '') +
+        '</div>' +
+        '<div class="tl-body">' +
+          '<div class="tags">' +
+            (s.tareas || []).map(function (t) { return '<span class="tag">' + esc(t) + '</span>'; }).join('') +
+            (s.repuestos || []).map(function (r) {
+              return '<span class="tag rep">' + ICON.box + ' ' + esc(r.nombre) + ' ×' + (Number(r.cantidad) || 1) + '</span>';
+            }).join('') +
+          '</div>' +
+          (s.obs ? '<p class="small muted mt10">' + esc(s.obs) + '</p>' : '') +
+          '<div class="tl-foot">' +
+            '<span class="xsmall muted">Mano de obra ' + money(s.manoObra) + (rep ? ' · Repuestos ' + money(rep) : '') + '</span>' +
+            '<span class="tl-cost">' + money(costo) + '</span>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+    }).join('');
+
+    return '<div class="row between" style="margin-bottom:14px;gap:12px;flex-wrap:wrap">' +
+        '<span class="badge">' + ICON.wrench + svs.length + ' intervención(es)</span>' +
+        '<span class="small muted">Gasto acumulado: <b class="mono">' + money(total) + '</b></span>' +
+      '</div>' +
+      '<div class="tl">' + items + '</div>';
+  }
+
+  function panelPropietario(v, cli) {
+    if (!cli) {
+      var ult = ultimoDuenoRegistrado(v);
+      return '<div class="alert">' + ICON.alert +
+        '<div><b>Propietario desconocido.</b><br>El vehículo está activo pero no tiene titular asociado.' +
+        (ult ? ' Último titular registrado: <b>' + esc(ult) + '</b>.' : '') +
+        ' Podés asignarle uno o mantenerlo desafiliado.</div>' +
+        '</div>' +
+        '<button class="btn primary full mt14" data-act="transferir" data-vehiculo="' + esc(v.id) + '">' + ICON.swap + ' Asignar titular</button>';
+    }
+    return '<div class="owner" style="background:#fff;align-items:center">' +
+        '<div class="avatar">' + esc(iniciales(cli.nombre)) + '</div>' +
+        '<div style="flex:1;min-width:0">' +
+          '<div class="strong">' + esc(cli.nombre) + '</div>' +
+          '<div class="small muted">Titular actual desde ' + (cli.desde ? fecha(cli.desde) : '—') + '</div>' +
+        '</div>' +
+        '<span class="badge ok">' + ICON.check + ' Titular</span>' +
+      '</div>' +
+      '<dl class="mt14">' +
+        kv('DNI / CUIT', '<span class="mono">' + esc(cli.dni) + '</span>') +
+        kv('Teléfono', cli.telefono ? '<a href="tel:' + esc(cli.telefono.replace(/[^\d+]/g, '')) + '">' + esc(cli.telefono) + '</a>' : '<span class="muted">Sin datos</span>') +
+        kv('Email', cli.email ? esc(cli.email) : '<span class="muted">Sin datos</span>') +
+        kv('Vehículo', esc(v.marca + ' ' + v.modelo + ' (' + (v.anio || '—') + ')')) +
+        kv('N° motor / chasis', '<span class="mono">' + esc(v.motor || '—') + '</span>') +
+        kv('Kilometraje', v.km ? num(v.km) + ' km' : '—') +
+      '</dl>' +
+      '<div class="row mt18" style="flex-wrap:wrap">' +
+        '<button class="btn" data-act="ver-cliente" data-cliente="' + esc(cli.id) + '">' + ICON.user + ' Ver ficha completa</button>' +
+        '<button class="btn danger" data-act="transferir" data-vehiculo="' + esc(v.id) + '">' + ICON.swap + ' Transferir Titularidad</button>' +
+        '<button class="btn danger" data-act="transferir" data-vehiculo="' + esc(v.id) + '" data-sin-titular="1">' + ICON.user + ' Desafiliar (Propietario desconocido)</button>' +
+      '</div>';
+  }
+
+  function kv(k, v) {
+    return '<div class="kv"><dt>' + esc(k) + '</dt><dd>' + v + '</dd></div>';
+  }
+
+  function panelDuenos(v) {
+    var duenos = (v.duenos || []).slice().reverse();
+    var cli = clientePorId(v.clienteId);
+
+    var html = '';
+    if (cli) {
+      html += '<p class="xsmall muted" style="margin-bottom:9px;text-transform:uppercase;letter-spacing:.6px;font-weight:700">Titular actual</p>' +
+        '<div class="owner" style="border-color:#bfdbfe;background:#eff6ff">' +
+          '<div class="avatar">' + esc(iniciales(cli.nombre)) + '</div>' +
+          '<div style="flex:1;min-width:0">' +
+            '<div class="strong">' + esc(cli.nombre) + '</div>' +
+            '<div class="small muted">DNI ' + esc(cli.dni) + ' · desde ' + (v.fechaAlta ? fecha(v.fechaAlta) : 'registro actual') + '</div>' +
+          '</div>' +
+          '<span class="badge ok">Actual</span>' +
+        '</div>';
+    }
+
+    html += '<p class="xsmall muted mt18" style="margin-bottom:9px;text-transform:uppercase;letter-spacing:.6px;font-weight:700">Propietarios anteriores</p>';
+    if (!duenos.length) {
+      html += '<div class="empty" style="padding:22px 10px">' + ICON.clock +
+        '<h3>Sin dueños anteriores</h3><p>Este vehículo siempre estuvo a nombre del titular actual.</p></div>';
+    } else {
+      html += duenos.map(function (d) {
+        return '<div class="owner">' +
+          '<div class="avatar">' + esc(iniciales(d.nombre)) + '</div>' +
+          '<div style="flex:1;min-width:0">' +
+            '<div class="strong">' + esc(d.nombre) + '</div>' +
+            '<div class="small muted">DNI ' + esc(d.dni) + '</div>' +
+            '<div class="xsmall muted mt6">' + fecha(d.desde) + ' → ' + fecha(d.hasta) + '</div>' +
+          '</div>' +
+          '<span class="badge off">Anterior</span>' +
+        '</div>';
+      }).join('');
+    }
+    return html;
+  }
+
+  /* ==========================================================
+     6. Búsqueda
+     ========================================================== */
+  function buscar(raw, tipoForzado) {
+    var q = String(raw || '').trim();
+    if (!q) { mostrarTodo(tipoForzado || estado.tipo); return; }   /* sin término: listar todo por tipo */
+
+    var tipo = tipoForzado || estado.tipo;
+    if (tipo === 'auto') tipo = detectarTipo(q);
+
+    /* Búsqueda por DNI */
+    if (tipo === 'dni') {
+      var cli = clientePorDni(q);
+      if (cli) { abrirCliente(cli.id); return; }
+      var parcialDni = DB.clientes.filter(function (c) { return norm(c.dni).indexOf(norm(q)) !== -1; });
+      if (parcialDni.length === 1) { abrirCliente(parcialDni[0].id); return; }
+      if (parcialDni.length > 1) { renderLista('clientes', parcialDni); return; }
+
+      /* Fallback: quizás era una patente numérica */
+      var vFallback = vehiculoPorPatente(q);
+      if (vFallback) { abrirVehiculo(vFallback.id); return; }
+      renderSinResultados(q);
+      return;
+    }
+
+    /* Búsqueda por patente */
+    var veh = vehiculoPorPatente(q);
+    if (veh) { abrirVehiculo(veh.id); return; }
+
+    var parciales = DB.vehiculos.filter(function (v) { return norm(v.patente).indexOf(norm(q)) !== -1; });
+    if (parciales.length === 1) { abrirVehiculo(parciales[0].id); return; }
+    if (parciales.length > 1) { renderLista('vehiculos', parciales); return; }
+
+    /* Si no hubo coincidencias como patente, probar como DNI */
+    var cli2 = clientePorDni(q);
+    if (cli2) { abrirCliente(cli2.id); return; }
+    renderSinResultados(q);
+  }
+
+  function renderLista(kind, items, titulo) {
+    estado.vista = 'inicio'; estado.clienteId = null; estado.vehiculoId = null;
+    var t = kind === 'clientes' ? 'clientes' : 'vehículos';
+    var html = '<div class="section"><div class="sec-head"><h2>' + esc(titulo || ('Coincidencias (' + t + ')')) + '</h2>' +
+      '<span class="count gray">' + items.length + '</span></div><div class="card fade-in">';
+    if (kind === 'clientes') {
+      html += items.map(function (c) {
+        var r = vehiculosDeCliente(c);
+        return '<div class="veh"><div class="veh-ico">' + ICON.user + '</div><div class="veh-body">' +
+          '<div class="veh-title"><strong>' + esc(c.nombre) + '</strong><span class="badge">DNI ' + esc(c.dni) + '</span></div>' +
+          '<div class="veh-sub">' + r.activos.length + ' vehículo(s) activo(s) · ' + esc(c.telefono || 'sin teléfono') + '</div>' +
+          '<div class="veh-actions"><button class="btn sm primary" data-act="ver-cliente" data-cliente="' + esc(c.id) + '">' + ICON.search + ' Abrir ficha</button></div>' +
+        '</div></div>';
+      }).join('');
+    } else {
+      html += items.map(function (v) { return vehRow(v, v.estado === 'historico'); }).join('');
+    }
+    html += '</div></div>';
+    RESULTS.innerHTML = html;
+  }
+
+  /* Listado completo cuando no hay término de búsqueda */
+  function mostrarTodo(tipo) {
+    if (tipo === 'patente') {
+      var vs = DB.vehiculos.slice().sort(function (a, b) { return a.patente.localeCompare(b.patente); });
+      renderLista('vehiculos', vs, 'Todos los vehículos registrados');
+    } else if (tipo === 'dni') {
+      var cs = DB.clientes.slice().sort(function (a, b) { return a.nombre.localeCompare(b.nombre); });
+      renderLista('clientes', cs, 'Todos los clientes registrados');
+    } else {
+      renderInicio();
+    }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function irAlInicio() {
+    estado.vista = 'inicio'; estado.clienteId = null; estado.vehiculoId = null; estado.tipo = 'auto';
+    $$('.chip').forEach(function (c) { c.classList.toggle('active', c.dataset.type === 'auto'); });
+    $('#q').value = '';
+    $('#q').placeholder = 'Ingrese Patente o DNI del cliente...';
+    try { if (location.hash) history.replaceState(null, '', location.pathname + location.search); } catch (e) {}
+    renderInicio();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function abrirCliente(id) {
+    var c = clientePorId(id);
+    if (!c) return;
+    estado.vista = 'cliente'; estado.clienteId = id; estado.vehiculoId = null;
+    renderCliente(c);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+  function abrirVehiculo(id) {
+    var v = vehiculoPorId(id);
+    if (!v) return;
+    estado.vista = 'vehiculo'; estado.vehiculoId = id; estado.tab = 'historial';
+    renderVehiculo(v);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+  function refrescar() {
+    if (estado.vista === 'cliente') { var c = clientePorId(estado.clienteId); if (c) renderCliente(c); else renderInicio(); }
+    else if (estado.vista === 'vehiculo') { var v = vehiculoPorId(estado.vehiculoId); if (v) renderVehiculo(v); else renderInicio(); }
+    else renderInicio();
+  }
+
+  /* ==========================================================
+     7. Modales
+     ========================================================== */
+  var abierto = null;
+
+  function abrirModal(id) {
+    var m = $(id);
+    if (!m) return;
+    m.classList.add('open');
+    abierto = m;
+    document.body.style.overflow = 'hidden';
+    var foco = m.querySelector('input, select, textarea, button');
+    if (foco && window.innerWidth > 720) setTimeout(function () { foco.focus(); }, 60);
+  }
+  function cerrarModal() {
+    if (!abierto) return;
+    abierto.classList.remove('open');
+    abierto = null;
+    document.body.style.overflow = '';
+    detenerCamara();
+  }
+  function toast(msg, esError) {
+    var t = document.createElement('div');
+    t.className = 'toast' + (esError ? ' err' : '');
+    t.innerHTML = (esError ? ICON.alert : ICON.check) + '<span>' + esc(msg) + '</span>';
+    $('#toasts').appendChild(t);
+    setTimeout(function () {
+      t.style.transition = 'opacity .25s ease, transform .25s ease';
+      t.style.opacity = '0'; t.style.transform = 'translateY(10px)';
+      setTimeout(function () { t.remove(); }, 260);
+    }, 3200);
+  }
+
+  /* ---------- Modal Nueva OT ---------- */
+  function abrirOT(vehiculoId, clienteId) {
+    estado.ctx = { clienteId: clienteId || null };
+    var sel = $('#ot-vehiculo');
+    var lista = DB.vehiculos.slice().sort(function (a, b) { return a.patente.localeCompare(b.patente); });
+    if (clienteId) {
+      var delCliente = lista.filter(function (v) { return v.clienteId === clienteId; });
+      if (delCliente.length) lista = delCliente.concat(lista.filter(function (v) { return v.clienteId !== clienteId; }));
+    }
+    sel.innerHTML = '<option value="">Seleccioná un vehículo…</option>' + lista.map(function (v) {
+      return '<option value="' + esc(v.id) + '">' + esc(v.patente + ' — ' + v.marca + ' ' + v.modelo + ' (' + (v.anio || '—') + ')') + '</option>';
+    }).join('');
+    if (vehiculoId) sel.value = vehiculoId;
+
+    var v = vehiculoId ? vehiculoPorId(vehiculoId) : null;
+    $('#ot-sub').textContent = v ? 'Vehículo: ' + v.patente + ' · ' + v.marca + ' ' + v.modelo : 'Cargá los datos del servicio realizado';
+    $('#ot-fecha').value = hoy();
+    $('#ot-km').value = v && v.km ? v.km : '';
+    $('#ot-mano').value = 0;
+    $('#ot-obs').value = '';
+
+    $('#ot-tareas').innerHTML = TAREAS_SUGERIDAS.map(function (t) {
+      return '<label class="check"><input type="checkbox" value="' + esc(t) + '">' + esc(t) + '</label>';
+    }).join('');
+
+    $('#ot-repuestos').innerHTML = '';
+    agregarRepuesto();
+    calcularTotal();
+    abrirModal('#modal-ot');
+  }
+
+  function agregarRepuesto() {
+    var row = document.createElement('div');
+    row.className = 'rep-row mt6';
+    row.innerHTML =
+      '<input class="inp" placeholder="Repuesto" data-rep="nombre">' +
+      '<input class="inp" type="number" min="1" step="1" value="1" data-rep="cantidad" inputmode="numeric" title="Cantidad">' +
+      '<input class="inp" type="number" min="0" step="100" value="0" data-rep="precio" inputmode="numeric" title="Precio unitario">' +
+      '<button type="button" class="icon-del" data-act="del-repuesto" title="Quitar">' + ICON.trash + '</button>';
+    $('#ot-repuestos').appendChild(row);
+  }
+
+  function leerRepuestos() {
+    return $$('#ot-repuestos .rep-row').map(function (r) {
+      var n = $('[data-rep="nombre"]', r).value.trim();
+      var c = Number($('[data-rep="cantidad"]', r).value) || 0;
+      var p = Number($('[data-rep="precio"]', r).value) || 0;
+      return { nombre: n, cantidad: c, precio: p };
+    }).filter(function (r) { return r.nombre && r.cantidad > 0; });
+  }
+
+  function calcularTotal() {
+    var mano = Number($('#ot-mano').value) || 0;
+    var rep = leerRepuestos().reduce(function (a, r) { return a + r.cantidad * r.precio; }, 0);
+    $('#ot-total').textContent = money(mano + rep);
+  }
+
+  function guardarOT() {
+    var vid = $('#ot-vehiculo').value;
+    if (!vid) { toast('Seleccioná un vehículo', true); return; }
+    var fechaVal = $('#ot-fecha').value || hoy();
+    var tareas = $$('#ot-tareas input:checked').map(function (i) { return i.value; });
+    var repuestos = leerRepuestos();
+    var mano = Number($('#ot-mano').value) || 0;
+
+    DB.servicios.push({
+      id: uid('srv'), vehiculoId: vid, fecha: fechaVal,
+      km: Number($('#ot-km').value) || null,
+      tareas: tareas, repuestos: repuestos, manoObra: mano,
+      obs: $('#ot-obs').value.trim()
+    });
+
+    var v = vehiculoPorId(vid);
+    if (v && Number($('#ot-km').value)) v.km = Number($('#ot-km').value);
+
+    var ok = guardar();
+    cerrarModal();
+    toast(ok ? 'Orden de trabajo guardada' : 'Orden guardada (sin persistencia local)');
+    if (estado.vista === 'vehiculo' && estado.vehiculoId === vid) { estado.tab = 'historial'; }
+    refrescar();
+  }
+
+  /* ---------- Modal Vehículo ---------- */
+  function abrirVehiculoModal(clienteId) {
+    var c = clientePorId(clienteId);
+    if (!c) return;
+    estado.ctx = { clienteId: clienteId };
+    $('#veh-sub').textContent = 'Se vinculará a ' + c.nombre + ' (DNI ' + c.dni + ')';
+    $('#vehForm').reset();
+    $('#v-anio').value = new Date().getFullYear();
+    abrirModal('#modal-vehiculo');
+  }
+
+  function guardarVehiculo() {
+    var form = $('#vehForm');
+    if (!form.reportValidity()) return;
+    var patente = norm($('#v-patente').value);
+    if (patente.length < 5) { toast('La patente parece incompleta', true); return; }
+    if (vehiculoPorPatente(patente)) { toast('Ya existe un vehículo con esa patente', true); return; }
+
+    var v = {
+      id: uid('veh'),
+      patente: patente,
+      marca: $('#v-marca').value.trim() || 'Sin marca',
+      modelo: $('#v-modelo').value.trim() || 'Sin modelo',
+      anio: Number($('#v-anio').value) || null,
+      color: $('#v-color').value.trim(),
+      km: Number($('#v-km').value) || null,
+      motor: $('#v-motor').value.trim(),
+      clienteId: estado.ctx.clienteId || null,
+      estado: 'activo',
+      fechaAlta: hoy(),
+      duenos: []
+    };
+    DB.vehiculos.push(v);
+    var ok = guardar();
+    cerrarModal();
+    toast(ok ? 'Vehículo asociado correctamente' : 'Vehículo asociado (sin persistencia local)');
+    estado.vista = 'vehiculo'; estado.vehiculoId = v.id; estado.tab = 'historial';
+    refrescar();
+  }
+
+  /* ---------- Modal Transferencia ---------- */
+  function abrirTransfer(vehiculoId, sinTitular) {
+    var v = vehiculoPorId(vehiculoId);
+    if (!v) return;
+    estado.ctx = { vehiculoId: vehiculoId };
+    $('#trForm').reset();
+    $('#tr-fecha').value = hoy();
+    $('#tr-sin-titular').checked = !!sinTitular;
+    alternarDatosTitular();
+    $('#tr-sub').textContent = 'Vehículo ' + v.patente + ' · titular actual: ' + nombrePropietario(v);
+    abrirModal('#modal-transfer');
+  }
+
+  /* Con “Propietario desconocido” los datos del nuevo titular no aplican */
+  function alternarDatosTitular() {
+    var off = $('#tr-sin-titular').checked;
+    var datos = $('#tr-datos');
+    if (datos) datos.style.display = off ? 'none' : '';
+    $$('#tr-datos input').forEach(function (i) { i.disabled = off; });
+  }
+
+  function guardarTransfer() {
+    var sinTitular = $('#tr-sin-titular').checked;
+    var form = $('#trForm');
+    if (!sinTitular && !form.reportValidity()) return;
+    var v = vehiculoPorId(estado.ctx.vehiculoId);
+    if (!v) return;
+
+    var f = $('#tr-fecha').value || hoy();
+
+    /* El titular actual pasa al histórico */
+    if (v.clienteId) {
+      var actual = clientePorId(v.clienteId);
+      if (actual) {
+        v.duenos = v.duenos || [];
+        v.duenos.push({ nombre: actual.nombre, dni: actual.dni, desde: actual.desde || v.fechaAlta || '—', hasta: f });
+      }
+    }
+
+    /* Desafiliar: el vehículo queda activo y sin propietario */
+    if (sinTitular) {
+      v.clienteId = null;
+      v.estado = 'activo';
+      var okOff = guardar();
+      cerrarModal();
+      estado.ctx = {};
+      estado.tab = 'propietario';
+      toast(okOff
+        ? v.patente + ' desafiliado: queda como “Propietario desconocido”'
+        : v.patente + ' desafiliado (sin persistencia local)');
+      abrirVehiculo(v.id);
+      return;
+    }
+
+    var dni = norm($('#tr-dni').value);
+    var nombre = $('#tr-nombre').value.trim();
+    var tel = $('#tr-tel').value.trim();
+
+    /* Nuevo titular: reutilizar o crear */
+    var nuevo = clientePorDni(dni);
+    if (!nuevo) {
+      nuevo = { id: uid('cli'), nombre: nombre, dni: dni, telefono: tel, email: '', desde: f };
+      DB.clientes.push(nuevo);
+    } else if (nombre) {
+      nuevo.nombre = nombre;
+      if (tel && !nuevo.telefono) nuevo.telefono = tel;
+    }
+
+    v.clienteId = nuevo.id;
+    v.estado = 'activo';
+    var ok = guardar();
+    cerrarModal();
+    toast(ok ? 'Titularidad transferida a ' + nuevo.nombre : 'Titularidad transferida (sin persistencia local)');
+    estado.vista = 'vehiculo'; estado.vehiculoId = v.id; estado.tab = 'propietario';
+    refrescar();
+  }
+
+  /* ---------- Modal Cliente ---------- */
+  function abrirClienteModal() {
+    $('#clForm').reset();
+    abrirModal('#modal-cliente');
+  }
+  function guardarCliente() {
+    var form = $('#clForm');
+    if (!form.reportValidity()) return;
+    var dni = norm($('#c-dni').value);
+    if (clientePorDni(dni)) { toast('Ya existe un cliente con ese DNI', true); return; }
+    var c = {
+      id: uid('cli'), nombre: $('#c-nombre').value.trim(), dni: dni,
+      telefono: $('#c-tel').value.trim(), email: $('#c-email').value.trim(), desde: hoy()
+    };
+    DB.clientes.push(c);
+    var ok = guardar();
+    cerrarModal();
+    toast(ok ? 'Cliente registrado' : 'Cliente registrado (sin persistencia local)');
+    abrirCliente(c.id);
+  }
+
+  /* ==========================================================
+     7.b Eliminar registros (con confirmación)
+     ========================================================== */
+  function abrirEliminar(kind, id) {
+    var msg = '', sub = 'Esta acción no se puede deshacer';
+
+    if (kind === 'cliente') {
+      var c = clientePorId(id);
+      if (!c) return;
+      var r = vehiculosDeCliente(c);
+      if (r.activos.length) {
+        toast('No se puede eliminar: ' + c.nombre + ' tiene ' + r.activos.length + ' vehículo(s) activo(s). Transferí la titularidad primero.', true);
+        return;
+      }
+      estado.ctx = { eliminar: { kind: 'cliente', id: id } };
+      $('#del-title').textContent = 'Eliminar cliente';
+      sub = c.nombre + ' · DNI ' + c.dni;
+      msg = 'Se eliminará la ficha de <b>' + esc(c.nombre) + '</b> (DNI ' + esc(c.dni) + ').' +
+        (r.historicos.length
+          ? ' Sus ' + r.historicos.length + ' vehículo(s) histórico(s) seguirán existiendo, pero quedarán <b>sin titular asociado</b>.'
+          : '') +
+        ' Las órdenes de trabajo ya cargadas no se borran.';
+    } else {
+      var v = vehiculoPorId(id);
+      if (!v) return;
+      var svs = serviciosDe(v.id);
+      estado.ctx = { eliminar: { kind: 'vehiculo', id: id } };
+      $('#del-title').textContent = 'Eliminar vehículo';
+      sub = v.patente + ' · ' + v.marca + ' ' + v.modelo;
+      msg = 'Se eliminará <b>' + esc(v.patente) + ' — ' + esc(v.marca + ' ' + v.modelo) + '</b>' +
+        (svs.length ? ' junto con sus <b>' + svs.length + ' orden(es) de trabajo</b>' : '') + '.' +
+        (v.clienteId ? ' El titular ' + esc(nombrePropietario(v)) + ' quedará sin este vehículo.' : '');
+    }
+
+    $('#del-sub').textContent = sub;
+    $('#del-msg').innerHTML = msg;
+    abrirModal('#modal-eliminar');
+  }
+
+  function confirmarEliminar() {
+    var e = estado.ctx.eliminar;
+    if (!e) { cerrarModal(); return; }
+    var eraCliente = e.kind === 'cliente';
+    var cliAfectado = null;
+
+    if (eraCliente) {
+      DB.clientes = DB.clientes.filter(function (c) { return c.id !== e.id; });
+      DB.vehiculos.forEach(function (v) { if (v.clienteId === e.id) v.clienteId = null; });
+    } else {
+      var v = vehiculoPorId(e.id);
+      cliAfectado = v ? v.clienteId : null;
+      DB.vehiculos = DB.vehiculos.filter(function (x) { return x.id !== e.id; });
+      DB.servicios = DB.servicios.filter(function (s) { return s.vehiculoId !== e.id; });
+    }
+
+    var ok = guardar();
+    cerrarModal();
+    estado.ctx = {};
+    toast((eraCliente ? 'Cliente eliminado' : 'Vehículo eliminado') + (ok ? '' : ' (sin persistencia local)'));
+
+    if (eraCliente) { irAlInicio(); return; }
+    estado.vehiculoId = null;
+    if (cliAfectado && clientePorId(cliAfectado)) abrirCliente(cliAfectado);
+    else { estado.vista = 'inicio'; renderInicio(); }
+  }
+
+  /* ==========================================================
+     8. Escáner (cámara + BarcodeDetector opcional)
+     ========================================================== */
+  var stream = null, detectLoop = null, detector = null;
+
+  function detenerCamara() {
+    if (detectLoop) { cancelAnimationFrame(detectLoop); detectLoop = null; }
+    if (stream) { stream.getTracks().forEach(function (t) { t.stop(); }); stream = null; }
+    var vid = $('#scan-video');
+    if (vid) vid.srcObject = null;
+  }
+
+  function abrirEscaner() {
+    $('#scan-manual').value = '';
+    $('#scan-note').hidden = true;
+    abrirModal('#modal-scan');
+    iniciarCamara();
+  }
+
+  function notaScan(txt) {
+    $('#scan-note').hidden = false;
+    $('#scan-note-txt').textContent = txt;
+  }
+
+  function iniciarCamara() {
+    var msg = $('#scan-msg');
+    var video = $('#scan-video');
+    msg.textContent = 'Iniciando cámara…';
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      msg.textContent = 'Cámara no disponible en este navegador';
+      notaScan('Tu navegador no expone la cámara (o estás en un contexto no seguro). Usá la lectura manual de abajo.');
+      return;
+    }
+
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false })
+      .then(function (s) {
+        stream = s;
+        video.srcObject = s;
+        video.play().catch(function () {});
+        msg.textContent = 'Apuntá al código / patente dentro del recuadro';
+
+        if ('BarcodeDetector' in window) {
+          try {
+            detector = new window.BarcodeDetector();
+            notaScan('Detección de códigos activa. También podés usar “Capturar y leer” para una lectura puntual.');
+            bucleDeteccion();
+          } catch (e) {
+            notaScan('Escáner nativo no disponible. Podés usar la lectura manual o completar el campo de búsqueda.');
+          }
+        } else {
+          notaScan('Este navegador no soporta detección automática de códigos. La vista previa queda activa: usá la lectura manual o escribí el dato en el buscador.');
+        }
+      })
+      .catch(function () {
+        msg.textContent = 'No se pudo acceder a la cámara';
+        notaScan('Permiso denegado o cámara ocupada. Podés escribir la patente o el DNI manualmente abajo.');
+      });
+  }
+
+  function bucleDeteccion() {
+    var video = $('#scan-video');
+    detectLoop = requestAnimationFrame(function tick() {
+      if (!stream) return;
+      if (video.readyState >= 2 && detector) {
+        detector.detect(video).then(function (codes) {
+          if (codes && codes.length) {
+            var val = codes[0].rawValue || '';
+            usarLectura(val);
+            return;
+          }
+          detectLoop = requestAnimationFrame(tick);
+        }).catch(function () { detectLoop = requestAnimationFrame(tick); });
+      } else {
+        detectLoop = requestAnimationFrame(tick);
+      }
+    });
+  }
+
+  function usarLectura(val) {
+    var v = String(val || '').trim();
+    cerrarModal();
+    if (!v) { toast('No se detectó ningún dato legible', true); return; }
+    $('#q').value = v.toUpperCase();
+    buscar(v, estado.tipo);
+  }
+
+  function capturarYLeer() {
+    var video = $('#scan-video');
+    if (detector && stream && video.readyState >= 2) {
+      detector.detect(video).then(function (codes) {
+        if (codes && codes.length) usarLectura(codes[0].rawValue);
+        else { toast('No se detectó ningún código. Probá acercar o usar la lectura manual.', true); }
+      }).catch(function () {
+        toast('Lectura no disponible. Usá la lectura manual o el buscador.', true);
+      });
+      return;
+    }
+    toast('Sin detección automática disponible: ingresá el dato manualmente.', true);
+    var man = $('#scan-manual');
+    if (man && !man.value) man.focus();
+  }
+
+  /* ==========================================================
+     9. Delegación de eventos
+     ========================================================== */
+  var ACCIONES = {
+    chip: function (el) {
+      estado.tipo = el.dataset.type;
+      $$('.chip').forEach(function (c) { c.classList.toggle('active', c.dataset.type === estado.tipo); });
+      var q = $('#q').value.trim();
+      if (q) buscar(q, null);
+      else mostrarTodo(estado.tipo);   /* sin texto: listar todo por tipo */
+    },
+    home: function () { irAlInicio(); },
+    'eliminar-registro': function (el) { abrirEliminar(el.dataset.kind, el.dataset.id); },
+    'confirmar-eliminar': function () { confirmarEliminar(); },
+    scan: function () { abrirEscaner(); },
+    capturar: function () { capturarYLeer(); },
+    'usar-manual': function () {
+      var v = $('#scan-manual').value.trim();
+      if (!v) { toast('Escribí un valor para buscar', true); return; }
+      usarLectura(v);
+    },
+    'nuevo-registro': function () { abrirClienteModal(); },
+    'nueva-ot': function (el) { abrirOT(el.dataset.vehiculo || null, el.dataset.cliente || null); },
+    'nuevo-vehiculo': function (el) { abrirVehiculoModal(el.dataset.cliente); },
+    transferir: function (el) { abrirTransfer(el.dataset.vehiculo, el.dataset.sinTitular === '1'); },
+    'sin-titular': function () {
+      var vs = DB.vehiculos.filter(function (v) { return !v.clienteId; })
+        .sort(function (a, b) { return a.patente.localeCompare(b.patente); });
+      if (!vs.length) { toast('No hay vehículos sin titular'); return; }
+      renderLista('vehiculos', vs, 'Vehículos sin titular (propietario desconocido)');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    },
+    'ver-cliente': function (el) { abrirCliente(el.dataset.cliente); },
+    'ver-vehiculo': function (el) { abrirVehiculo(el.dataset.vehiculo); },
+    'cerrar-modal': function () { cerrarModal(); },
+    'add-repuesto': function () { agregarRepuesto(); calcularTotal(); },
+    'del-repuesto': function (el) {
+      var row = el.closest('.rep-row');
+      if (row) row.remove();
+      calcularTotal();
+    },
+    'guardar-ot': function () { guardarOT(); },
+    'guardar-vehiculo': function () { guardarVehiculo(); },
+    'guardar-transfer': function () { guardarTransfer(); },
+    'guardar-cliente': function () { guardarCliente(); },
+    tab: function (el) {
+      estado.tab = el.dataset.tab;
+      $$('.tab').forEach(function (t) { t.classList.toggle('active', t === el); t.setAttribute('aria-selected', t === el); });
+      $$('.tabpanel').forEach(function (p) { p.classList.toggle('active', p.dataset.panel === estado.tab); });
+    }
+  };
+
+  document.addEventListener('click', function (ev) {
+    var el = ev.target.closest ? ev.target.closest('[data-act]') : null;
+    if (!el) {
+      if (ev.target.classList && ev.target.classList.contains('backdrop')) cerrarModal();
+      return;
+    }
+    var fn = ACCIONES[el.dataset.act];
+    if (fn) { ev.preventDefault(); fn(el, ev); }
+  });
+
+  document.addEventListener('keydown', function (ev) {
+    if (ev.key === 'Escape' && abierto) cerrarModal();
+  });
+
+  $('#searchForm').addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    buscar($('#q').value, null);
+  });
+
+  /* Ninguna app-form debe recargar la página con Enter */
+  document.addEventListener('submit', function (ev) { ev.preventDefault(); });
+
+  /* Autodetección visual del tipo mientras se escribe */
+  var tipoDetectadoTimer = null;
+  $('#q').addEventListener('input', function () {
+    var q = $('#q').value.trim();
+    if (!q) {
+      $$('.chip').forEach(function (c) { c.classList.toggle('active', c.dataset.type === 'auto'); });
+      estado.tipo = 'auto';
+      return;
+    }
+    clearTimeout(tipoDetectadoTimer);
+    tipoDetectadoTimer = setTimeout(function () {
+      if (estado.tipo !== 'auto') return;
+      var t = detectarTipo(q);
+      if (t === 'auto') return;
+      $('#q').placeholder = t === 'dni' ? 'Búsqueda por DNI detectada…' : 'Búsqueda por patente detectada…';
+      setTimeout(function () { $('#q').placeholder = 'Ingrese Patente o DNI del cliente...'; }, 1600);
+    }, 420);
+  });
+
+  /* Cálculo de total en vivo */
+  $('#ot-mano').addEventListener('input', calcularTotal);
+  $('#ot-repuestos').addEventListener('input', calcularTotal);
+
+  /* Enter en lectura manual */
+  $('#scan-manual').addEventListener('keydown', function (ev) {
+    if (ev.key === 'Enter') { ev.preventDefault(); ACCIONES['usar-manual'](); }
+  });
+
+  /* Autocompletado del nombre al escribir un DNI conocido en la transferencia */
+  /* Datos del titular vs. “Propietario desconocido” */
+  $('#tr-sin-titular').addEventListener('change', alternarDatosTitular);
+
+  $('#tr-dni').addEventListener('blur', function () {
+    var c = clientePorDni($('#tr-dni').value);
+    if (c) {
+      $('#tr-nombre').value = c.nombre;
+      if (c.telefono) $('#tr-tel').value = c.telefono;
+      toast('Cliente encontrado: se reutilizará su ficha');
+    }
+  });
+
+  /* ==========================================================
+     10. Arranque
+     ========================================================== */
+  renderInicio();
+
+  /* Deep-link simple por hash: #patente o #dni */
+  if (location.hash.length > 1) {
+    var val = decodeURIComponent(location.hash.slice(1));
+    $('#q').value = val;
+    buscar(val, null);
+  }
+})();
+</script>
+</body>
+</html>
