@@ -705,18 +705,23 @@
   }
 
   /* ==========================================================
-     Carga dinámica del motor OCR (Tesseract.js v5) desde su CDN.
-     - Se inyecta una sola vez: los clicks repetidos reutilizan la misma descarga.
-     - cb(error) reporta el resultado; un timeout de 20 s evita dejar
-       al usuario colgado si la red no responde.
+     Motor OCR (Tesseract.js v5) desde su CDN.
+     · La librería se descarga una sola vez; los clicks repetidos
+       reusan la misma descarga (cola de callbacks).
+     · El worker de Tesseract se crea UNA vez y queda PERSISTENTE:
+       así setParameters() aplica seguro el whitelist de caracteres
+       y el modo de segmentación (PSM) en cada pasada, y no hay que
+       re-pagar la creaciación del worker en cada captura.
+     · timeout de 20 s: si la red no responde no se deja colgado
+       al usuario.
      ========================================================== */
   var TESSERACT_CDN = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
   var tesseractEstado = 'no-iniciado';   // no-iniciado | cargando | listo | error
   var tesseractCola = [];                // callbacks esperando la carga
+  var workerOCR = null;                  // instancia persistente del worker
 
   function cargarTesseract(cb) {
-    if (window.Tesseract) { tesseractEstado = 'listo'; cb(null); return; }
-
+    if (tesseractEstado === 'listo' && workerOCR) { cb(null); return; }
     if (tesseractEstado === 'cargando') { tesseractCola.push(cb); return; }
 
     tesseractEstado = 'cargando';
@@ -730,30 +735,68 @@
       pendientes.forEach(function (f) { f(err || null); });
     }
 
-    var script = document.createElement('script');
-    script.src = TESSERACT_CDN;
-    script.async = true;
+    /* Paso 2: crear el worker persistente (con logger de progreso) */
+    function pasoWorker() {
+      if (!window.Tesseract || !window.Tesseract.createWorker) {
+        terminar(new Error('motor incompleto'));
+        toast('La librería OCR cargó incompleta. Reintentá.', true);
+        return;
+      }
+      if (workerOCR) { terminar(null); return; }
 
-    var temporizador = setTimeout(function () {
-      if (window.Tesseract) { terminar(null); return; }
-      terminar(new Error('timeout'));
-      toast('El motor OCR tardó demasiado en descargar', true);
-      notaScan('No se pudo descargar el OCR (red lenta o sin internet). Usá la lectura manual de abajo o reintentá.');
-    }, 20000);
+      window.Tesseract.createWorker('eng', 1, {
+        logger: function (m) {
+          if (!m) return;
+          var msg = $('#scan-msg');
+          if (!msg) return;
+          var p = Math.round((m.progress || 0) * 100);
+          if (m.status === 'loading tesseract core' || m.status === 'initializing tesseract') {
+            msg.textContent = 'Iniciando el motor OCR… ' + p + '%';
+          } else if (m.status === 'loading language traineddata') {
+            msg.textContent = 'Preparando el idioma de lectura… ' + p + '%';
+          } else if (m.status === 'recognizing text') {
+            msg.textContent = 'Leyendo la chapa… ' + p + '%';
+          }
+        }
+      }).then(function (w) {
+        workerOCR = w;
+        terminar(null);
+      }).catch(function (e) {
+        console.error('OCR worker:', e);
+        terminar(new Error('worker'));
+        toast('No se pudo iniciar el motor OCR', true);
+        notaScan('Falló el arranque del OCR. Reintentá o usá la lectura manual.');
+      });
+    }
 
-    script.onload = function () {
-      clearTimeout(temporizador);
-      if (window.Tesseract) terminar(null);
-      else terminar(new Error('carga incompleta'));
-    };
-    script.onerror = function () {
-      clearTimeout(temporizador);
-      terminar(new Error('no se pudo descargar'));
-      toast('Error al cargar el motor OCR. Verificá tu conexión a internet.', true);
-      notaScan('No se pudo descargar Tesseract.js desde el CDN. Usá la lectura manual de abajo o reintentá.');
-    };
+    /* Paso 1: descargar la librería si todavía no está en la página */
+    function pasoLibreria() {
+      var script = document.createElement('script');
+      script.src = TESSERACT_CDN;
+      script.async = true;
 
-    document.head.appendChild(script);
+      var temporizador = setTimeout(function () {
+        if (window.Tesseract) { pasoWorker(); return; }
+        terminar(new Error('timeout'));
+        toast('El motor OCR tardó demasiado en descargar', true);
+        notaScan('No se pudo descargar el OCR (red lenta o sin internet). Escribí la patente en la lectura manual o reintentá.');
+      }, 20000);
+
+      script.onload = function () {
+        clearTimeout(temporizador);
+        pasoWorker();
+      };
+      script.onerror = function () {
+        clearTimeout(temporizador);
+        terminar(new Error('no se pudo descargar'));
+        toast('Error al cargar el motor OCR. Verificá tu conexión a internet.', true);
+        notaScan('No se pudo descargar Tesseract.js desde el CDN. Escribí la patente en la lectura manual o reintentá.');
+      };
+
+      document.head.appendChild(script);
+    }
+
+    if (window.Tesseract) pasoWorker(); else pasoLibreria();
   }
 
   /* ==========================================================
@@ -822,10 +865,58 @@
   }
 
   /* ==========================================================
-     Captura de fotograma + OCR + búsqueda automática
-     Para chapas se usa una lectura en DOS PASADAS:
-       intento 1 → PSM 7  (línea única: la chapa entera como línea)
-       intento 2 → PSM 6  (bloque uniforme: encuadre más abierto)
+     Región de Interés (ROI): coordenadas del recuadro del visor
+     (.scan-frame, inset 16% del stage) trasladadas a PIXELES del
+     fotograma real del <video>.
+     El video usa object-fit:cover, así que la pantalla no mapea
+     1:1 con los píxeles de la cámara: hay que deshacer la escala
+     y el centrado de cover para recortar EXACTAMENTE lo que el
+     usuario ve dentro del cuadro.
+     ========================================================== */
+  function rectROIEnVideo() {
+    var video = $('#scan-video');
+    if (!video || !video.parentNode) return null;
+    var frame = video.parentNode.querySelector('.scan-frame');
+    var vr = video.getBoundingClientRect();
+    var fr = frame ? frame.getBoundingClientRect() : null;
+    var vw = video.videoWidth, vh = video.videoHeight;
+    if (!vw || !vh || !vr.width || !vr.height) return null;
+
+    /* Sin recuadro medible: fallback = caja central (proporción del inset 16%) */
+    if (!fr || !fr.width || !fr.height) {
+      return { sx: vw * 0.16, sy: vh * 0.16, sw: vw * 0.68, sh: vh * 0.68 };
+    }
+
+    /* Recuadro en fracción de la pantalla del video */
+    var px1 = (fr.left - vr.left) / vr.width, px2 = (fr.right - vr.left) / vr.width;
+    var py1 = (fr.top - vr.top) / vr.height, py2 = (fr.bottom - vr.top) / vr.height;
+
+    /* Deshacer el object-fit:cover (escala + centrado del contenido) */
+    var escala = Math.max(vr.width / vw, vr.height / vh);
+    var dibW = vw * escala, dibH = vh * escala;
+    var offX = (vr.width - dibW) / 2, offY = (vr.height - dibH) / 2;
+
+    var sx = (px1 * vr.width - offX) / escala;
+    var sy = (py1 * vr.height - offY) / escala;
+    var ex = (px2 * vr.width - offX) / escala;
+    var ey = (py2 * vr.height - offY) / escala;
+
+    sx = Math.max(0, Math.min(vw, sx)); sy = Math.max(0, Math.min(vh, sy));
+    ex = Math.max(0, Math.min(vw, ex)); ey = Math.max(0, Math.min(vh, ey));
+    if (ex - sx < 24 || ey - sy < 16) return null;   /* encuadre degenerado */
+
+    return { sx: sx, sy: sy, sw: ex - sx, sh: ey - sy };
+  }
+
+  /* ==========================================================
+     Captura de fotograma + ROI + pre-procesado + OCR + búsqueda
+     Pipeline de una captura:
+       1. Recorte ROI (sólo el recuadro del visor descartando fondo).
+       2. Escalado + escala de grises + binarización Otsu (canvas oculto).
+       3. Two-pass Tesseract con whitelist A-Z0-9:
+            - intento 1 → PSM 7 (línea única: la chapa entera)
+            - intento 2 → PSM 6 (bloque uniforme: encuadre amplio)
+       4. extraerPatenteOTexto() valida el formato → #q → buscar().
      ========================================================== */
   function capturarYLeer() {
     var video = $('#scan-video');
@@ -841,15 +932,18 @@
     ocrSeq++;
     var turno = ocrSeq;
 
-    /* 1) Fotograma actual del <video> dibujado en un canvas interno.
-       Se limita el tamaño (ancho máx. 1600 px) para que el OCR no arrastre. */
-    var ancho = video.videoWidth || 640;
-    var alto = video.videoHeight || 480;
-    var escala = Math.min(1, 1600 / ancho);
+    /* 1) ROI: sólo los píxeles del recuadro del visor */
+    var vw = video.videoWidth || 640, vh = video.videoHeight || 480;
+    var roi = rectROIEnVideo() || { sx: vw * 0.16, sy: vh * 0.16, sw: vw * 0.68, sh: vh * 0.68 };
+
     var canvas = document.createElement('canvas');
-    canvas.width = Math.round(ancho * escala);
-    canvas.height = Math.round(alto * escala);
-    canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+    canvas.width = Math.min(1600, Math.round(roi.sw));
+    canvas.height = Math.round(roi.sh * (canvas.width / roi.sw));
+    canvas.getContext('2d').drawImage(
+      video,
+      roi.sx, roi.sy, roi.sw, roi.sh,        /* origen: recuadro en píxeles de cámara */
+      0, 0, canvas.width, canvas.height      /* destino: canvas de recorte */
+    );
 
     /* 2) Motor OCR: cargar (una vez) y reconocer con progreso en vivo */
     msg.textContent = 'Preparando el motor de lectura (OCR)…';
@@ -862,7 +956,7 @@
         return;
       }
 
-      /* 3) Pre-procesamiento: grises + binarización Otsu + escalado */
+      /* 2.b) Pre-procesamiento: grises + binarización Otsu + escalado */
       var cvListo = prepararCanvasOCR(canvas);
 
       function leer(intento) {
@@ -871,19 +965,13 @@
           : (window.Tesseract.PSM ? window.Tesseract.PSM.SINGLE_BLOCK : '6');
         if (intento === 2) msg.textContent = 'Sin chapa clara: segundo intento con encuadre amplio…';
 
-        window.Tesseract.recognize(cvListo, 'eng', {
+        /* Whitelist: el motor deja de dilucidar signos, tildes o
+           minúsculas: sólo hay caracteres válidos de patente. */
+        workerOCR.setParameters({
           tessedit_pageseg_mode: psm,
-          logger: function (m) {
-            if (turno !== ocrSeq || !m) return;
-            var p = Math.round((m.progress || 0) * 100);
-            if (m.status === 'loading tesseract core' || m.status === 'initializing tesseract') {
-              msg.textContent = 'Iniciando el motor OCR… ' + p + '%';
-            } else if (m.status === 'loading language traineddata') {
-              msg.textContent = 'Preparando el idioma de lectura… ' + p + '%';
-            } else if (m.status === 'recognizing text') {
-              msg.textContent = 'Leyendo la chapa… ' + p + '%';
-            }
-          }
+          tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+        }).then(function () {
+          return workerOCR.recognize(cvListo);
         }).then(function (res) {
           if (turno !== ocrSeq) return;
           var textoBruto = res && res.data ? (res.data.text || '') : '';
@@ -897,8 +985,8 @@
 
           /* Lectura poco clara: guiar al usuario sin cerrar el modal */
           msg.textContent = 'Lectura poco clara';
-          notaScan('No se detectó una patente legible. Enfocá de nuevo con buena luz, la chapa bien encuadrada y sin reflejos, pulsá "Capturar y leer" otra vez, o usá la lectura manual.');
-          toast('No se pudo leer una patente. Probá de nuevo o usá la lectura manual.', true);
+          notaScan('No se detectó una patente legible. Acercá el celular a la chapa, encuadrá el recuadro sin reflejos y pulsá "Capturar y leer" de nuevo; o usá la lectura manual.');
+          toast('No se pudo leer la chapa. Acercate más o usá la lectura manual.', true);
         }).catch(function (e) {
           if (turno !== ocrSeq) return;
           if (intento === 1) { leer(2); return; }   /* error en la 1ª pasada: probar la 2ª */
