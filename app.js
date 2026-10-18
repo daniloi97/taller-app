@@ -1045,17 +1045,50 @@
       return;
     }
 
-    navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false })
-      .then(function (s) {
-        stream = s;
-        video.srcObject = s;
-        video.play().catch(function () {});
-        msg.textContent = 'Apuntá la patente dentro del recuadro';
-        notaScan('Presioná "Capturar y leer" para leer la chapa impresa (Mercosur o antigua).');
-      })
+    /* Muestra el stream en el <video>. La preview sigue usando
+       object-fit:cover y rectROIEnVideo() deshace ese mapeo con los
+       videoWidth/Height reales del sensor: así la imagen no se deforma
+       y el cálculo de la ROI del OCR queda inalterado, sin importar
+       qué lente (1x u otro) terminó activándose. */
+    function mostrar(s) {
+      stream = s;
+      video.srcObject = s;
+      video.play().catch(function () {});
+      msg.textContent = 'Apuntá la patente dentro del recuadro';
+      notaScan('Presioná "Capturar y leer" para leer la chapa impresa (Mercosur o antigua).');
+    }
+
+    function pedir(cs) {
+      return navigator.mediaDevices.getUserMedia(cs);
+    }
+
+    /* Restricción avanzada `advanced` = "deseable, no obligatoria": en
+       móviles con varios lentes traseros pide el sensor principal (zoom 1x)
+       en lugar del ultra gran angular 0.5x que Chromium elige por defecto.
+       Los navegadores modernos la ignoran con elegancia si no soportan
+       zoom; los que no toleran la clave caen en el intento de abajo. */
+    var csPrincipal = {
+      video: { facingMode: { ideal: 'environment' }, advanced: [{ zoom: 1.0 }] },
+      audio: false
+    };
+
+    /* Respaldo: restricciones convencionales, idénticas a las de siempre. */
+    var csConvencional = {
+      video: { facingMode: { ideal: 'environment' } },
+      audio: false
+    };
+
+    pedir(csPrincipal)
+      .then(mostrar)
       .catch(function () {
-        msg.textContent = 'No se pudo acceder a la cámara';
-        notaScan('Permiso denegado o cámara ocupada. Podés escribir la patente manualmente abajo.');
+        /* OverconstrainedError, clave `advanced` desconocida o error
+           propio del lente: se reintenta sin ella antes de rendirse. */
+        pedir(csConvencional)
+          .then(mostrar)
+          .catch(function () {
+            msg.textContent = 'No se pudo acceder a la cámara';
+            notaScan('Permiso denegado o cámara ocupada. Podés escribir la patente manualmente abajo.');
+          });
       });
   }
 
