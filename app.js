@@ -77,38 +77,48 @@
   }
 
   /* ==========================================================
-     Extrae un dato válido (patente o DNI) del texto crudo del OCR.
-     Devuelve el valor NORMALIZADO (mayúsculas, sin separadores)
-     o null si no hay ninguna lectura confiable. La función nunca
-     devuelve texto basura: si no reconoce un patrón, devuelve null
-     para que la UI invite a reintentar o usar la lectura manual.
+     Extrae una PATENTE del texto crudo del OCR.
+     El taller escanea chapas, no documentos: DELIBERADAMENTE se
+     ignoran secuencias de dígitos (DNIs, telefonía, montos) para
+     no generar búsquedas sin sentido.
+     Formatos aceptados:
+       · Mercosur  XX-NNN-XX  (AB 123 CD — el OCR suele separar grupos)
+       · Antigua   XXX-NNN    (ABC 123)
+       · Antigua larga  X-NNN-XXX  (A 123 BCD)
+     Devuelve la patente NORMALIZADA (mayúsculas, sin separadores)
+     o null si no hay ninguna lectura confiable. Nunca devuelve
+     texto basura: sin patrón → null → la UI invita a reintentar
+     o usar la lectura manual.
      ========================================================== */
   function extraerPatenteOTexto(texto) {
     /* Normalización: mayúsculas, separadores no alfanuméricos → espacios */
     var t = String(texto || '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
     if (!t) return null;
 
-    /* 1) Patente Mercosur: AB 123 CD (el OCR suele separar los grupos) */
-    var mMe = t.match(/\b[A-Z]{2}\s*\d{3}\s*[A-Z]{2}\b/);
-    if (mMe) return norm(mMe[0]);
+    var patrones = [
+      /* Mercosur: AB 123 CD / AB123CD / AB-123-CD */
+      /\b[A-Z]{2}\s*\d{3}\s*[A-Z]{2}\b/,
+      /* Antigua corta: ABC 123 */
+      /\b[A-Z]{3}\s*\d{3}\b/,
+      /* Antigua larga: A 123 BCD */
+      /\b[A-Z]\s*\d{3}\s*[A-Z]{3}\b/
+    ];
 
-    /* 2) Patente antigua: ABC 123 / A 123 BCD */
-    var mAn = t.match(/\b[A-Z]{3}\s*\d{3}\b/);
-    if (mAn) return norm(mAn[0]);
-    var mAnB = t.match(/\b[A-Z]\s*\d{3}\s*[A-Z]{3}\b/);
-    if (mAnB) return norm(mAnB[0]);
+    /* 1) Pasada normal: cada grupo puede venir espaciado */
+    for (var i = 0; i < patrones.length; i++) {
+      var m = t.match(patrones[i]);
+      if (m) return norm(m[0]);
+    }
 
-    /* 3) DNI: 7 u 8 dígitos aislados (con o sin puntos) */
-    var mDni = t.match(/\b\d{7,8}\b/);
-    if (mDni) return mDni[0];
-    /* Documentos impresos como "30.123.456": probar los dígitos unidos */
-    var mDniPtos = t.match(/\b\d{2,3}[ .]\d{3}[ .]\d{3}\b/);
-    if (mDniPtos) return mDniPtos[0].replace(/[^0-9]/g, '');
-
-    /* 4) Último recurso disciplinado: UN token alfanumérico con letras
-       y números mezclados (patente mal encuadrada u parcialmente leída) */
-    var mMix = t.match(/\b(?=[A-Z0-9]*[A-Z])(?=[A-Z0-9]*\d)[A-Z0-9]{5,8}\b/);
-    if (mMix) return mMix[0];
+    /* 2) Rescate: OCR que partió los grupos de forma irregular
+       ("AB1 23CD"). Se reintentan los patrones sin ningún espacio. */
+    var tSin = t.replace(/\s+/g, '');
+    if (tSin !== t) {
+      for (var j = 0; j < patrones.length; j++) {
+        var m2 = tSin.match(patrones[j]);
+        if (m2) return m2[0];
+      }
+    }
 
     return null;
   }
@@ -685,12 +695,12 @@
         stream = s;
         video.srcObject = s;
         video.play().catch(function () {});
-        msg.textContent = 'Apuntá la patente o DNI dentro del recuadro';
-        notaScan('Presioná "Capturar y leer" para procesar el texto impreso en la chapa o documento.');
+        msg.textContent = 'Apuntá la patente dentro del recuadro';
+        notaScan('Presioná "Capturar y leer" para leer la chapa impresa (Mercosur o antigua).');
       })
       .catch(function () {
         msg.textContent = 'No se pudo acceder a la cámara';
-        notaScan('Permiso denegado. Podés ingresar la patente o DNI manualmente abajo.');
+        notaScan('Permiso denegado. Podés escribir la patente manualmente abajo.');
       });
   }
 
@@ -747,7 +757,75 @@
   }
 
   /* ==========================================================
+     Pre-procesamiento de la imagen para el OCR.
+     Las fotos reales de chapas salen con sombra, reflejos y ruido:
+     1) se agranda si es chica (la tipografía de la chapa es fina),
+     2) se pasa a escala de grises (luminancia),
+     3) se binariza con el umbral de Otsu (texto negro / fondo blanco),
+        lo que recorta drásticamente el confundido de caracteres
+        gris-sobre-gris del video sin exponer cambios de colores de fondo.
+     Devuelve un canvas listo para Tesseract.
+     ========================================================== */
+  function prepararCanvasOCR(src) {
+    var w = src.width, h = src.height;
+    /* 1) Escalado: fotos menores a 1000 px de ancho se amplían hasta 2x */
+    var escala = (w && w < 1000) ? Math.min(2, 1000 / w) : 1;
+    var cv = document.createElement('canvas');
+    cv.width = Math.round((w || 640) * escala);
+    cv.height = Math.round((h || 480) * escala);
+    var ctx = cv.getContext('2d');
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(src, 0, 0, cv.width, cv.height);
+
+    try {
+      var img = ctx.getImageData(0, 0, cv.width, cv.height);
+      var px = img.data;
+      var hist = new Array(256);
+      for (var i = 0; i < 256; i++) hist[i] = 0;
+
+      /* 2) Escala de grises + histograma (luminancia 0.299/0.587/0.114) */
+      for (var p = 0; p < px.length; p += 4) {
+        var g = (px[p] * 0.299 + px[p + 1] * 0.587 + px[p + 2] * 0.114) | 0;
+        px[p] = px[p + 1] = px[p + 2] = g;
+        hist[g]++;
+      }
+
+      /* 3) Umbral de Otsu: separa el gris en dos clases maximizando
+         la varianza entre clases (texto vs fondo). */
+      var total = px.length / 4;
+      var sumaT = 0;
+      for (var q = 0; q < 256; q++) sumaT += q * hist[q];
+      var sumaB = 0, wB = 0, mejor = -1, umbral = 127;
+      for (var t2 = 0; t2 < 256; t2++) {
+        wB += hist[t2];
+        if (!wB) continue;
+        var wF = total - wB;
+        if (!wF) break;
+        sumaB += t2 * hist[t2];
+        var mB = sumaB / wB, mF = (sumaT - sumaB) / wF;
+        var entre = wB * wF * (mB - mF) * (mB - mF);
+        if (entre > mejor) { mejor = entre; umbral = t2; }
+      }
+      /* Imagen uniforme (cámara tapada): Otsu no aporta, se conserva la gris. */
+      if (mejor > 0) {
+        for (var r = 0; r < px.length; r += 4) {
+          var v = px[r] > umbral ? 255 : 0;   /* texto negro sobre fondo blanco */
+          px[r] = px[r + 1] = px[r + 2] = v;
+        }
+        ctx.putImageData(img, 0, 0);
+      }
+    } catch (e) {
+      /* getImageData puede fallar si el frame viene viciado; se sigue con
+         la imagen tal cual está: mejor intentar que cancelar la lectura. */
+    }
+    return cv;
+  }
+
+  /* ==========================================================
      Captura de fotograma + OCR + búsqueda automática
+     Para chapas se usa una lectura en DOS PASADAS:
+       intento 1 → PSM 7  (línea única: la chapa entera como línea)
+       intento 2 → PSM 6  (bloque uniforme: encuadre más abierto)
      ========================================================== */
   function capturarYLeer() {
     var video = $('#scan-video');
@@ -784,37 +862,54 @@
         return;
       }
 
-      window.Tesseract.recognize(canvas, 'eng', {
-        logger: function (m) {
-          if (turno !== ocrSeq || !m) return;
-          var p = Math.round((m.progress || 0) * 100);
-          if (m.status === 'loading tesseract core' || m.status === 'initializing tesseract') {
-            msg.textContent = 'Iniciando el motor OCR… ' + p + '%';
-          } else if (m.status === 'loading language traineddata') {
-            msg.textContent = 'Preparando el inglés (eng)… ' + p + '%';
-          } else if (m.status === 'recognizing text') {
-            msg.textContent = 'Leyendo texto… ' + p + '%';
+      /* 3) Pre-procesamiento: grises + binarización Otsu + escalado */
+      var cvListo = prepararCanvasOCR(canvas);
+
+      function leer(intento) {
+        var psm = (intento === 1)
+          ? (window.Tesseract.PSM ? window.Tesseract.PSM.SINGLE_LINE : '7')
+          : (window.Tesseract.PSM ? window.Tesseract.PSM.SINGLE_BLOCK : '6');
+        if (intento === 2) msg.textContent = 'Sin chapa clara: segundo intento con encuadre amplio…';
+
+        window.Tesseract.recognize(cvListo, 'eng', {
+          tessedit_pageseg_mode: psm,
+          logger: function (m) {
+            if (turno !== ocrSeq || !m) return;
+            var p = Math.round((m.progress || 0) * 100);
+            if (m.status === 'loading tesseract core' || m.status === 'initializing tesseract') {
+              msg.textContent = 'Iniciando el motor OCR… ' + p + '%';
+            } else if (m.status === 'loading language traineddata') {
+              msg.textContent = 'Preparando el idioma de lectura… ' + p + '%';
+            } else if (m.status === 'recognizing text') {
+              msg.textContent = 'Leyendo la chapa… ' + p + '%';
+            }
           }
-        }
-      }).then(function (res) {
-        if (turno !== ocrSeq) return;
-        var textoBruto = res && res.data ? (res.data.text || '') : '';
-        var dato = extraerPatenteOTexto(textoBruto);
+        }).then(function (res) {
+          if (turno !== ocrSeq) return;
+          var textoBruto = res && res.data ? (res.data.text || '') : '';
+          var dato = extraerPatenteOTexto(textoBruto);
 
-        /* 3) Con coincidencia limpia: cerrar, volcar en #q y buscar */
-        if (dato) { usarLectura(dato); return; }
+          /* Con coincidencia limpia: cerrar, volcar en #q y buscar */
+          if (dato) { usarLectura(dato); return; }
 
-        /* 4) Lectura poco clara: guiar al usuario sin cerrar el modal */
-        msg.textContent = 'Lectura poco clara';
-        notaScan('No se detectó una patente o DNI legible. Enfocá de nuevo con buena luz y la chapa bien encuadrada, pulsá "Capturar y leer" otra vez, o usá la lectura manual.');
-        toast('No se pudo extraer un dato claro. Probá de nuevo o usá la lectura manual.', true);
-      }).catch(function (e) {
-        if (turno !== ocrSeq) return;
-        console.error('OCR:', e);
-        msg.textContent = 'Error durante la lectura';
-        notaScan('El procesamiento de imagen falló. Probá de nuevo o ingresá el dato manualmente.');
-        toast('Error durante la lectura de la imagen.', true);
-      });
+          /* Sin patrón de patente: segunda pasada con PSM 6 */
+          if (intento === 1) { leer(2); return; }
+
+          /* Lectura poco clara: guiar al usuario sin cerrar el modal */
+          msg.textContent = 'Lectura poco clara';
+          notaScan('No se detectó una patente legible. Enfocá de nuevo con buena luz, la chapa bien encuadrada y sin reflejos, pulsá "Capturar y leer" otra vez, o usá la lectura manual.');
+          toast('No se pudo leer una patente. Probá de nuevo o usá la lectura manual.', true);
+        }).catch(function (e) {
+          if (turno !== ocrSeq) return;
+          if (intento === 1) { leer(2); return; }   /* error en la 1ª pasada: probar la 2ª */
+          console.error('OCR:', e);
+          msg.textContent = 'Error durante la lectura';
+          notaScan('El procesamiento de imagen falló. Probá de nuevo o ingresá la patente manualmente.');
+          toast('Error durante la lectura de la imagen.', true);
+        });
+      }
+
+      leer(1);
     });
   }
 
