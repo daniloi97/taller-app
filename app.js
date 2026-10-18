@@ -1,6 +1,13 @@
 /* ============================================================================
    TALLER MECÁNICO · HISTORIA CLÍNICA VEHICULAR
-   app.js — lógica completa de la aplicación (Vanilla JS, sin dependencias)
+   app.js — lógica completa de la aplicación (Vanilla JS)
+
+   · Única referencia externa opcional: el motor OCR de Tesseract.js se
+     carga bajo demanda desde su CDN oficial
+     (https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js)
+     SOLO la primera vez que se usa el botón "Capturar y leer" del escáner.
+     Si no hay internet, el resto de la app funciona igual y el escáner
+     cae con elegancia a la lectura manual.
 
    Reglas de negocio clave:
    · Un cliente puede tener VARIOS vehículos con estado 'activo' a la vez.
@@ -13,6 +20,10 @@
    · La lógica se carga desde <script src="app.js"></script> al final del
      <body> para que el parsing del HTML no se bloquee (defer implícito).
    · El script va dentro de una IIFE para no contaminar el ámbito global.
+   ============================================================================ */
+/* ============================================================================
+   TALLER MECÁNICO · HISTORIA CLÍNICA VEHICULAR
+   app.js — lógica completa de la aplicación con OCR (Tesseract.js)
    ============================================================================ */
 (function () {
   'use strict';
@@ -51,7 +62,7 @@
     return String(nombre || '?').trim().split(/\s+/).slice(0, 2).map(function (w) { return w.charAt(0).toUpperCase(); }).join('');
   }
 
-  /* Detección automática del tipo de búsqueda (patente o DNI) */
+  /* Detección automática del tipo de búsqueda */
   function detectarTipo(raw) {
     var v = norm(raw);
     if (!v) return 'auto';
@@ -66,7 +77,44 @@
   }
 
   /* ==========================================================
-     1. "Base de datos" local: seed + persistencia localStorage
+     Extrae un dato válido (patente o DNI) del texto crudo del OCR.
+     Devuelve el valor NORMALIZADO (mayúsculas, sin separadores)
+     o null si no hay ninguna lectura confiable. La función nunca
+     devuelve texto basura: si no reconoce un patrón, devuelve null
+     para que la UI invite a reintentar o usar la lectura manual.
+     ========================================================== */
+  function extraerPatenteOTexto(texto) {
+    /* Normalización: mayúsculas, separadores no alfanuméricos → espacios */
+    var t = String(texto || '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
+    if (!t) return null;
+
+    /* 1) Patente Mercosur: AB 123 CD (el OCR suele separar los grupos) */
+    var mMe = t.match(/\b[A-Z]{2}\s*\d{3}\s*[A-Z]{2}\b/);
+    if (mMe) return norm(mMe[0]);
+
+    /* 2) Patente antigua: ABC 123 / A 123 BCD */
+    var mAn = t.match(/\b[A-Z]{3}\s*\d{3}\b/);
+    if (mAn) return norm(mAn[0]);
+    var mAnB = t.match(/\b[A-Z]\s*\d{3}\s*[A-Z]{3}\b/);
+    if (mAnB) return norm(mAnB[0]);
+
+    /* 3) DNI: 7 u 8 dígitos aislados (con o sin puntos) */
+    var mDni = t.match(/\b\d{7,8}\b/);
+    if (mDni) return mDni[0];
+    /* Documentos impresos como "30.123.456": probar los dígitos unidos */
+    var mDniPtos = t.match(/\b\d{2,3}[ .]\d{3}[ .]\d{3}\b/);
+    if (mDniPtos) return mDniPtos[0].replace(/[^0-9]/g, '');
+
+    /* 4) Último recurso disciplinado: UN token alfanumérico con letras
+       y números mezclados (patente mal encuadrada u parcialmente leída) */
+    var mMix = t.match(/\b(?=[A-Z0-9]*[A-Z])(?=[A-Z0-9]*\d)[A-Z0-9]{5,8}\b/);
+    if (mMix) return mMix[0];
+
+    return null;
+  }
+
+  /* ==========================================================
+     1. Base de Datos Local (seed)
      ========================================================== */
   var seed = {
     clientes: [
@@ -75,79 +123,19 @@
       { id: 'cli_3', nombre: 'Roberto Díaz', dni: '20456789', telefono: '351 622-3388', email: '', desde: '2015-02-18' }
     ],
     vehiculos: [
-      {
-        id: 'veh_1', patente: 'AB123CD', marca: 'Toyota', modelo: 'Corolla XEI 2.0', anio: 2019,
-        color: 'Gris Plata', km: 128400, clienteId: 'cli_1', estado: 'activo',
-        motor: '2ZR-A118842',
-        duenos: []
-      },
-      {
-        id: 'veh_2', patente: 'LKM447', marca: 'Ford', modelo: 'Fiesta Kinetic', anio: 2011,
-        color: 'Rojo', km: 214000, clienteId: null, estado: 'historico',
-        motor: 'CFN-77120',
-        duenos: [
-          { nombre: 'Juan Carlos Pérez', dni: '30123456', desde: '2012-03-05', hasta: '2021-11-30' },
-          { nombre: 'Roberto Díaz', dni: '20456789', desde: '2021-11-30', hasta: '2024-06-14' }
-        ]
-      },
-      {
-        id: 'veh_3', patente: 'AD998ZZ', marca: 'Volkswagen', modelo: 'Amarok Highline', anio: 2022,
-        color: 'Negro', km: 46300, clienteId: 'cli_2', estado: 'activo',
-        motor: 'DDX-551230',
-        duenos: []
-      },
-      {
-        id: 'veh_4', patente: 'JUV210', marca: 'Renault', modelo: 'Clio Authentique', anio: 2008,
-        color: 'Azul', km: 268900, clienteId: null, estado: 'historico',
-        motor: 'K4M-990211',
-        duenos: [
-          { nombre: 'María González', dni: '27876543', desde: '2013-07-22', hasta: '2022-02-09' }
-        ]
-      },
-      {
-        id: 'veh_5', patente: 'AE451QW', marca: 'Chevrolet', modelo: 'Onix LTZ', anio: 2023,
-        color: 'Blanco', km: 18900, clienteId: 'cli_1', estado: 'activo',
-        motor: 'LXT-330912',
-        duenos: []
-      }
+      { id: 'veh_1', patente: 'AB123CD', marca: 'Toyota', modelo: 'Corolla XEI 2.0', anio: 2019, color: 'Gris Plata', km: 128400, clienteId: 'cli_1', estado: 'activo', motor: '2ZR-A118842', duenos: [] },
+      { id: 'veh_2', patente: 'LKM447', marca: 'Ford', modelo: 'Fiesta Kinetic', anio: 2011, color: 'Rojo', km: 214000, clienteId: null, estado: 'historico', motor: 'CFN-77120', duenos: [{ nombre: 'Juan Carlos Pérez', dni: '30123456', desde: '2012-03-05', hasta: '2021-11-30' }, { nombre: 'Roberto Díaz', dni: '20456789', desde: '2021-11-30', hasta: '2024-06-14' }] },
+      { id: 'veh_3', patente: 'AD998ZZ', marca: 'Volkswagen', modelo: 'Amarok Highline', anio: 2022, color: 'Negro', km: 46300, clienteId: 'cli_2', estado: 'activo', motor: 'DDX-551230', duenos: [] },
+      { id: 'veh_4', patente: 'JUV210', marca: 'Renault', modelo: 'Clio Authentique', anio: 2008, color: 'Azul', km: 268900, clienteId: null, estado: 'historico', motor: 'K4M-990211', duenos: [{ nombre: 'María González', dni: '27876543', desde: '2013-07-22', hasta: '2022-02-09' }] },
+      { id: 'veh_5', patente: 'AE451QW', marca: 'Chevrolet', modelo: 'Onix LTZ', anio: 2023, color: 'Blanco', km: 18900, clienteId: 'cli_1', estado: 'activo', motor: 'LXT-330912', duenos: [] }
     ],
     servicios: [
-      {
-        id: 'srv_1', vehiculoId: 'veh_1', fecha: '2026-08-14', km: 126800, manoObra: 150000,
-        tareas: ['Cambio de aceite y filtro', 'Service 20.000 km'],
-        repuestos: [{ nombre: 'Filtro de aceite', cantidad: 1, precio: 42000 }, { nombre: 'Aceite 5W30 (4L)', cantidad: 1, precio: 96000 }],
-        obs: 'Se recomienda revisar tren delantero en el próximo ingreso.'
-      },
-      {
-        id: 'srv_2', vehiculoId: 'veh_1', fecha: '2026-03-02', km: 119300, manoObra: 98000,
-        tareas: ['Cambio de pastillas de freno', 'Rectificado de discos'],
-        repuestos: [{ nombre: 'Pastillas delanteras', cantidad: 1, precio: 135000 }, { nombre: 'Líquido de frenos', cantidad: 1, precio: 28000 }],
-        obs: ''
-      },
-      {
-        id: 'srv_3', vehiculoId: 'veh_1', fecha: '2025-11-19', km: 111000, manoObra: 60000,
-        tareas: ['Alineación y balanceo'],
-        repuestos: [],
-        obs: 'Se corrigió convergencia.'
-      },
-      {
-        id: 'srv_4', vehiculoId: 'veh_3', fecha: '2026-06-27', km: 44100, manoObra: 210000,
-        tareas: ['Distribución completa', 'Cambio de aceite y filtro'],
-        repuestos: [{ nombre: 'Kit de distribución', cantidad: 1, precio: 480000 }, { nombre: 'Bomba de agua', cantidad: 1, precio: 175000 }],
-        obs: 'Cliente autoriza recambio de bomba de agua.'
-      },
-      {
-        id: 'srv_5', vehiculoId: 'veh_2', fecha: '2020-05-08', km: 198000, manoObra: 45000,
-        tareas: ['Cambio de embrague'],
-        repuestos: [{ nombre: 'Kit de embrague', cantidad: 1, precio: 168000 }],
-        obs: 'Vehículo luego transferido.'
-      },
-      {
-        id: 'srv_6', vehiculoId: 'veh_5', fecha: '2026-09-05', km: 18200, manoObra: 72000,
-        tareas: ['Cambio de aceite y filtro', 'Revisión general'],
-        repuestos: [{ nombre: 'Filtro de aire', cantidad: 1, precio: 31000 }, { nombre: 'Aceite 0W20 (4L)', cantidad: 1, precio: 118000 }],
-        obs: ''
-      }
+      { id: 'srv_1', vehiculoId: 'veh_1', fecha: '2026-08-14', km: 126800, manoObra: 150000, tareas: ['Cambio de aceite y filtro', 'Service 20.000 km'], repuestos: [{ nombre: 'Filtro de aceite', cantidad: 1, precio: 42000 }, { nombre: 'Aceite 5W30 (4L)', cantidad: 1, precio: 96000 }], obs: 'Se recomienda revisar tren delantero en el próximo ingreso.' },
+      { id: 'srv_2', vehiculoId: 'veh_1', fecha: '2026-03-02', km: 119300, manoObra: 98000, tareas: ['Cambio de pastillas de freno', 'Rectificado de discos'], repuestos: [{ nombre: 'Pastillas delanteras', cantidad: 1, precio: 135000 }, { nombre: 'Líquido de frenos', cantidad: 1, precio: 28000 }], obs: '' },
+      { id: 'srv_3', vehiculoId: 'veh_1', fecha: '2025-11-19', km: 111000, manoObra: 60000, tareas: ['Alineación y balanceo'], repuestos: [], obs: 'Se corrigió convergencia.' },
+      { id: 'srv_4', vehiculoId: 'veh_3', fecha: '2026-06-27', km: 44100, manoObra: 210000, tareas: ['Distribución completa', 'Cambio de aceite y filtro'], repuestos: [{ nombre: 'Kit de distribución', cantidad: 1, precio: 480000 }, { nombre: 'Bomba de agua', cantidad: 1, precio: 175000 }], obs: 'Cliente autoriza recambio de bomba de agua.' },
+      { id: 'srv_5', vehiculoId: 'veh_2', fecha: '2020-05-08', km: 198000, manoObra: 45000, tareas: ['Cambio de embrague'], repuestos: [{ nombre: 'Kit de embrague', cantidad: 1, precio: 168000 }], obs: 'Vehículo luego transferido.' },
+      { id: 'srv_6', vehiculoId: 'veh_5', fecha: '2026-09-05', km: 18200, manoObra: 72000, tareas: ['Cambio de aceite y filtro', 'Revisión general'], repuestos: [{ nombre: 'Filtro de aire', cantidad: 1, precio: 31000 }, { nombre: 'Aceite 0W20 (4L)', cantidad: 1, precio: 118000 }], obs: '' }
     ]
   };
 
@@ -160,7 +148,7 @@
         var d = JSON.parse(raw);
         if (d && d.clientes && d.vehiculos && d.servicios) return d;
       }
-    } catch (e) { /* modo incógnito / file:// restringido */ }
+    } catch (e) {}
     return JSON.parse(JSON.stringify(seed));
   }
   function guardar() {
@@ -169,7 +157,7 @@
   }
 
   /* ==========================================================
-     2. Accesores y reglas de negocio
+     2. Accesores y Reglas
      ========================================================== */
   function clientePorId(id) { return DB.clientes.filter(function (c) { return c.id === id; })[0] || null; }
   function clientePorDni(dni) { var d = norm(dni); return DB.clientes.filter(function (c) { return norm(c.dni) === d; })[0] || null; }
@@ -179,39 +167,24 @@
     return DB.servicios.filter(function (s) { return s.vehiculoId === vid; })
       .sort(function (a, b) { return (b.fecha || '').localeCompare(a.fecha || ''); });
   }
-  function totalServicios(vid) {
-    return serviciosDe(vid).reduce(function (acc, s) {
-      var rep = (s.repuestos || []).reduce(function (a, r) { return a + (Number(r.cantidad) || 0) * (Number(r.precio) || 0); }, 0);
-      return acc + (Number(s.manoObra) || 0) + rep;
-    }, 0);
-  }
   function nombrePropietario(v) {
     var c = clientePorId(v.clienteId);
-    if (c) return c.nombre;
-    return 'Propietario desconocido';
+    return c ? c.nombre : 'Propietario desconocido';
   }
-  /* Último dueño conocido (aunque hoy no sea el titular) */
   function ultimoDuenoRegistrado(v) {
     var c = clientePorId(v.clienteId);
     if (c) return c.nombre;
     if (v.duenos && v.duenos.length) return v.duenos[v.duenos.length - 1].nombre;
     return null;
   }
-
-  /* Vehículos de un cliente.
-     ACTIVOS: hoy es el titular registrado Y el vehículo está en circulación
-     (estado 'activo'). Un cliente puede tener tantos activos como Autos
-     tenga a su nombre: cada uno aparece con sus propias acciones.
-     HISTÓRICOS: vehículos que tuvo a su nombre en el pasado (aparece en
-     vehiculo.duenos) — se llega ahí sólo por transferencia o desafiliación. */
   function vehiculosDeCliente(cli) {
     var activos = [], historicos = [];
     DB.vehiculos.forEach(function (v) {
       var esTitularActual = v.clienteId === cli.id;
       var fueDueno = (v.duenos || []).some(function (d) { return norm(d.dni) === norm(cli.dni); });
       if (esTitularActual && (v.estado !== 'historico')) {
-        activos.push(v);                       /* estado 'activo' (u omitido) */
-        if (v.estado !== 'activo') v.estado = 'activo';   /* normaliza datos viejos */
+        activos.push(v);
+        if (v.estado !== 'activo') v.estado = 'activo';
       } else if (esTitularActual && v.estado === 'historico') {
         historicos.push(v);
       } else if (fueDueno) {
@@ -225,12 +198,12 @@
      3. Estado de UI
      ========================================================== */
   var estado = {
-    tipo: 'auto',          // auto | patente | dni
-    vista: 'inicio',       // inicio | cliente | vehiculo
+    tipo: 'auto',
+    vista: 'inicio',
     clienteId: null,
     vehiculoId: null,
-    tab: 'historial',      // historial | propietario | duenos
-    ctx: {}                // contexto de modales
+    tab: 'historial',
+    ctx: {}
   };
 
   var TAREAS_SUGERIDAS = [
@@ -240,7 +213,7 @@
   ];
 
   /* ==========================================================
-     4. Iconos (SVG inline, sin dependencias)
+     4. Iconos (SVG inline)
      ========================================================== */
   var ICON = {
     user: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>',
@@ -255,7 +228,6 @@
     check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>',
     trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-14"/></svg>',
     alert: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>',
-    info: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>',
     box: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/></svg>',
     shield: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v6c0 4.4-3 8.2-7 9-4-.8-7-4.6-7-9V6z"/></svg>',
     sun: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2M12 19.5v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2.5 12h2M19.5 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>',
@@ -264,7 +236,7 @@
   };
 
   /* ==========================================================
-     5. Render principal
+     5. Render Principal
      ========================================================== */
   var RESULTS = $('#results');
 
@@ -274,11 +246,11 @@
         '<div class="empty">' +
           ICON.search +
           '<h3>Buscá un cliente o un vehículo</h3>' +
-          '<p>Ingresá una <b>patente</b> o un <b>DNI</b> en el buscador. El tipo de búsqueda se detecta automáticamente, o podés forzarlo con los badges superiores.</p>' +
+          '<p>Ingresá una <b>patente</b> o un <b>DNI</b> en el buscador. El tipo de búsqueda se detecta automáticamente.</p>' +
           '<div class="hints">' +
             '<div class="hint"><div class="n">1</div><p>Patente Mercosur: <code>AB123CD</code> · antigua: <code>LKM447</code></p></div>' +
             '<div class="hint"><div class="n">2</div><p>DNI del cliente: <code>30123456</code> (7 u 8 dígitos)</p></div>' +
-            '<div class="hint"><div class="n">3</div><p>O escaneá con la cámara usando el botón <b>QR/scan</b> del buscador</p></div>' +
+            '<div class="hint"><div class="n">3</div><p>Usa la cámara con <b>Capturar y leer</b> para fotografiar la patente</p></div>' +
           '</div>' +
           '<div class="row" style="justify-content:center;flex-wrap:wrap;margin-top:16px">' +
             '<button class="btn" data-act="sin-titular">' + ICON.shield + ' Ver vehículos sin titular</button>' +
@@ -297,12 +269,12 @@
         '<p>No encontramos ningún cliente ni vehículo con ese dato.</p>' +
         '<div class="row" style="justify-content:center;flex-wrap:wrap;margin-top:16px">' +
           '<button class="btn primary" data-act="nuevo-registro">' + ICON.plus + ' Registrar cliente</button>' +
-          '<button class="btn" data-act="scan">' + ICON.search + ' Escanear</button>' +
+          '<button class="btn" data-act="scan">' + ICON.search + ' Escanear otra vez</button>' +
         '</div>' +
       '</div></section>';
   }
 
-  /* ---------- Vista CLIENTE ---------- */
+  /* Vista CLIENTE */
   function renderCliente(cli) {
     var r = vehiculosDeCliente(cli);
     var html = '';
@@ -315,9 +287,8 @@
             '<h2>' + esc(cli.nombre) + '</h2>' +
             '<div class="sub">Cliente registrado' + (cli.desde ? ' desde ' + fecha(cli.desde) : '') + '</div>' +
           '</div>' +
-          '<span class="badge ok" style="background:rgba(255,255,255,.14);border-color:rgba(255,255,255,.24);color:#e8eefb">' +
-            ICON.shield + ' Ficha activa</span>' +
-          '<button type="button" class="hd-btn" data-act="eliminar-registro" data-kind="cliente" data-id="' + esc(cli.id) + '" title="Eliminar cliente" aria-label="Eliminar cliente">' + ICON.trash + '</button>' +
+          '<span class="badge ok" style="background:rgba(255,255,255,.14);border-color:rgba(255,255,255,.24);color:#e8eefb">' + ICON.shield + ' Ficha activa</span>' +
+          '<button type="button" class="hd-btn" data-act="eliminar-registro" data-kind="cliente" data-id="' + esc(cli.id) + '" title="Eliminar cliente">' + ICON.trash + '</button>' +
         '</div>' +
         '<div class="hd-meta">' +
           '<span class="meta-pill">' + ICON.id + '<b>' + esc(cli.dni) + '</b></span>' +
@@ -327,60 +298,41 @@
         '</div>' +
       '</section>';
 
-    /* Vehículos activos: UNA TARJETA POR VEHÍCULO, cada una con sus
-       acciones propias (Seleccionar para servicio / Ver ficha). */
-    html += '<div class="section">' +
-      '<div class="sec-head"><h2>Vehículos Activos</h2><span class="count">' + r.activos.length + '</span></div>';
+    html += '<div class="section"><div class="sec-head"><h2>Vehículos Activos</h2><span class="count">' + r.activos.length + '</span></div>';
     if (r.activos.length) {
       html += '<div class="card">' + r.activos.map(function (v) { return vehRow(v, false); }).join('') + '</div>';
     } else {
-      html += '<div class="card"><div class="empty" style="padding:26px 18px">' + ICON.car +
-        '<h3>Sin vehículos activos</h3><p>Este cliente no tiene vehículos en circulación registrados.</p></div></div>';
+      html += '<div class="card"><div class="empty" style="padding:26px 18px">' + ICON.car + '<h3>Sin vehículos activos</h3></div></div>';
     }
     html += '</div>';
 
-    /* Historial de vehículos (sólo transferidos o desafiliados) */
-    html += '<div class="section">' +
-      '<div class="sec-head"><h2>Historial de Vehículos Anteriores</h2><span class="count gray">' + r.historicos.length + '</span></div>';
+    html += '<div class="section"><div class="sec-head"><h2>Historial de Vehículos Anteriores</h2><span class="count gray">' + r.historicos.length + '</span></div>';
     if (r.historicos.length) {
       html += '<div class="card">' + r.historicos.map(function (v) { return vehRow(v, true); }).join('') + '</div>';
     } else {
-      html += '<div class="card"><div class="empty" style="padding:24px 18px">' + ICON.clock +
-        '<h3>Sin antecedentes</h3><p>No hay vehículos vendidos o transferidos para este cliente.</p></div></div>';
+      html += '<div class="card"><div class="empty" style="padding:24px 18px">' + ICON.clock + '<h3>Sin antecedentes</h3></div></div>';
     }
     html += '</div>';
 
     html += '<div class="section">' +
-      '<button class="btn primary full" data-act="nuevo-vehiculo" data-cliente="' + esc(cli.id) + '">' +
-        ICON.plus + ' Asociar Nuevo Vehículo a este Cliente</button>' +
-      '<button class="btn full mt10" data-act="nueva-ot" data-cliente="' + esc(cli.id) + '">' +
-        ICON.wrench + ' Nueva Orden de Trabajo</button>' +
+      '<button class="btn primary full" data-act="nuevo-vehiculo" data-cliente="' + esc(cli.id) + '">' + ICON.plus + ' Asociar Nuevo Vehículo a este Cliente</button>' +
+      '<button class="btn full mt10" data-act="nueva-ot" data-cliente="' + esc(cli.id) + '">' + ICON.wrench + ' Nueva Orden de Trabajo</button>' +
     '</div>';
 
     RESULTS.innerHTML = html;
   }
 
   function vehRow(v, historico) {
-    var duenoTxt = historico
-      ? 'Histórico · ' + (v.clienteId ? 'titular actual: ' + nombrePropietario(v) : 'sin titular actual')
-      : '';
+    var duenoTxt = historico ? 'Histórico · ' + (v.clienteId ? 'titular: ' + nombrePropietario(v) : 'sin titular') : '';
     return '<div class="veh ' + (historico ? 'off' : '') + '">' +
       '<div class="veh-ico">' + ICON.car + '</div>' +
       '<div class="veh-body">' +
         '<div class="veh-title">' +
           '<span class="plate">' + esc(v.patente) + '</span>' +
           '<strong>' + esc(v.marca) + ' ' + esc(v.modelo) + '</strong>' +
-          (historico
-            ? '<span class="badge off">' + ICON.clock + ' Anterior</span>'
-            : '<span class="badge ok">' + ICON.check + ' Activo</span>') +
+          (historico ? '<span class="badge off">Anterior</span>' : '<span class="badge ok">Activo</span>') +
         '</div>' +
-        '<div class="veh-sub">' +
-          'Año ' + esc(v.anio || '—') +
-          (v.color ? ' · ' + esc(v.color) : '') +
-          (v.km ? ' · ' + num(v.km) + ' km' : '') +
-          ' · ' + serviciosDe(v.id).length + ' servicio(s)' +
-          (duenoTxt ? ' · ' + esc(duenoTxt) : '') +
-        '</div>' +
+        '<div class="veh-sub">Año ' + esc(v.anio || '—') + (v.color ? ' · ' + esc(v.color) : '') + (v.km ? ' · ' + num(v.km) + ' km' : '') + ' · ' + serviciosDe(v.id).length + ' servicio(s)' + (duenoTxt ? ' · ' + esc(duenoTxt) : '') + '</div>' +
         '<div class="veh-actions">' +
           (historico
             ? '<button class="btn sm" data-act="ver-vehiculo" data-vehiculo="' + esc(v.id) + '">' + ICON.clock + ' Ver historial</button>'
@@ -391,7 +343,7 @@
     '</div>';
   }
 
-  /* ---------- Vista VEHÍCULO ---------- */
+  /* Vista VEHÍCULO */
   function renderVehiculo(v) {
     var cli = clientePorId(v.clienteId);
     var svs = serviciosDe(v.id);
@@ -406,15 +358,11 @@
             '<h2 style="margin-top:9px">' + esc(v.marca || '—') + ' ' + esc(v.modelo || '') + '</h2>' +
             '<div class="sub">Año ' + esc(v.anio || '—') + (v.color ? ' · ' + esc(v.color) : '') + '</div>' +
           '</div>' +
-          (v.estado === 'historico'
-            ? '<span class="badge" style="background:rgba(255,255,255,.14);border-color:rgba(255,255,255,.24);color:#e8eefb">' + ICON.clock + ' Histórico</span>'
-            : '<span class="badge" style="background:rgba(16,185,129,.22);border-color:rgba(16,185,129,.45);color:#d1fae5">' + ICON.check + ' Activo</span>') +
-          '<button type="button" class="hd-btn" data-act="eliminar-registro" data-kind="vehiculo" data-id="' + esc(v.id) + '" title="Eliminar vehículo" aria-label="Eliminar vehículo">' + ICON.trash + '</button>' +
+          (v.estado === 'historico' ? '<span class="badge">' + ICON.clock + ' Histórico</span>' : '<span class="badge ok">' + ICON.check + ' Activo</span>') +
+          '<button type="button" class="hd-btn" data-act="eliminar-registro" data-kind="vehiculo" data-id="' + esc(v.id) + '" title="Eliminar vehículo">' + ICON.trash + '</button>' +
         '</div>' +
         '<div class="hd-meta">' +
-          (cli
-            ? '<span class="meta-pill">' + ICON.user + '<b>' + esc(cli.nombre) + '</b></span>'
-            : '<span class="meta-pill warn">' + ICON.user + '<b>Propietario desconocido</b></span>') +
+          (cli ? '<span class="meta-pill">' + ICON.user + '<b>' + esc(cli.nombre) + '</b></span>' : '<span class="meta-pill warn">' + ICON.user + '<b>Propietario desconocido</b></span>') +
           '<span class="meta-pill">' + ICON.wrench + '<b>' + svs.length + '</b> servicios</span>' +
           '<span class="meta-pill">' + ICON.clock + 'Últ. ' + (svs[0] ? fecha(svs[0].fecha) : '—') + '</span>' +
           (v.km ? '<span class="meta-pill">' + ICON.car + '<b>' + num(v.km) + '</b> km</span>' : '') +
@@ -422,11 +370,9 @@
       '</section>';
 
     if (cli) {
-      html += '<div class="section"><button class="btn full" data-act="ver-cliente" data-cliente="' + esc(cli.id) + '">' +
-        ICON.user + ' Ver ficha del cliente: ' + esc(cli.nombre) + '</button></div>';
+      html += '<div class="section"><button class="btn full" data-act="ver-cliente" data-cliente="' + esc(cli.id) + '">' + ICON.user + ' Ver ficha del cliente: ' + esc(cli.nombre) + '</button></div>';
     }
 
-    /* Tabs */
     html += '<div class="section"><div class="card">' +
       '<div class="tabs" role="tablist">' +
         tabBtn('historial', 'Historial de Servicios', estado.tab) +
@@ -442,177 +388,83 @@
   }
 
   function tabBtn(key, label, active) {
-    return '<button class="tab ' + (key === active ? 'active' : '') + '" role="tab" data-act="tab" data-tab="' + key + '" ' +
-      'aria-selected="' + (key === active) + '">' + esc(label) + '</button>';
+    return '<button class="tab ' + (key === active ? 'active' : '') + '" role="tab" data-act="tab" data-tab="' + key + '">' + esc(label) + '</button>';
   }
 
   function panelHistorial(svs) {
-    if (!svs.length) {
-      return '<div class="empty" style="padding:26px 10px">' + ICON.wrench +
-        '<h3>Sin servicios registrados</h3><p>Todavía no hay órdenes de trabajo para este vehículo.</p></div>';
-    }
-    var total = svs.reduce(function (a, s) {
-      return a + (Number(s.manoObra) || 0) + (s.repuestos || []).reduce(function (x, r) {
-        return x + (Number(r.cantidad) || 0) * (Number(r.precio) || 0);
-      }, 0);
-    }, 0);
-
+    if (!svs.length) return '<div class="empty">' + ICON.wrench + '<h3>Sin servicios registrados</h3></div>';
+    var total = svs.reduce(function (a, s) { return a + (Number(s.manoObra) || 0) + (s.repuestos || []).reduce(function (x, r) { return x + (Number(r.cantidad) || 0) * (Number(r.precio) || 0); }, 0); }, 0);
     var items = svs.map(function (s) {
       var rep = (s.repuestos || []).reduce(function (a, r) { return a + (Number(r.cantidad) || 0) * (Number(r.precio) || 0); }, 0);
       var costo = (Number(s.manoObra) || 0) + rep;
-      return '<div class="tl-item">' +
-        '<div class="tl-hd"><time>' + fecha(s.fecha) + '</time>' +
-          (s.km ? '<span class="km">' + num(s.km) + ' km</span>' : '') +
-        '</div>' +
-        '<div class="tl-body">' +
-          '<div class="tags">' +
-            (s.tareas || []).map(function (t) { return '<span class="tag">' + esc(t) + '</span>'; }).join('') +
-            (s.repuestos || []).map(function (r) {
-              return '<span class="tag rep">' + ICON.box + ' ' + esc(r.nombre) + ' ×' + (Number(r.cantidad) || 1) + '</span>';
-            }).join('') +
-          '</div>' +
-          (s.obs ? '<p class="small muted mt10">' + esc(s.obs) + '</p>' : '') +
-          '<div class="tl-foot">' +
-            '<span class="xsmall muted">Mano de obra ' + money(s.manoObra) + (rep ? ' · Repuestos ' + money(rep) : '') + '</span>' +
-            '<span class="tl-cost">' + money(costo) + '</span>' +
-          '</div>' +
-        '</div>' +
-      '</div>';
+      return '<div class="tl-item"><div class="tl-hd"><time>' + fecha(s.fecha) + '</time>' + (s.km ? '<span class="km">' + num(s.km) + ' km</span>' : '') + '</div>' +
+        '<div class="tl-body"><div class="tags">' + (s.tareas || []).map(function (t) { return '<span class="tag">' + esc(t) + '</span>'; }).join('') +
+        (s.repuestos || []).map(function (r) { return '<span class="tag rep">' + ICON.box + ' ' + esc(r.nombre) + ' ×' + (Number(r.cantidad) || 1) + '</span>'; }).join('') + '</div>' +
+        (s.obs ? '<p class="small muted mt10">' + esc(s.obs) + '</p>' : '') +
+        '<div class="tl-foot"><span class="xsmall muted">Mano de obra ' + money(s.manoObra) + (rep ? ' · Repuestos ' + money(rep) : '') + '</span><span class="tl-cost">' + money(costo) + '</span></div></div></div>';
     }).join('');
-
-    return '<div class="row between" style="margin-bottom:14px;gap:12px;flex-wrap:wrap">' +
-        '<span class="badge">' + ICON.wrench + svs.length + ' intervención(es)</span>' +
-        '<span class="small muted">Gasto acumulado: <b class="mono">' + money(total) + '</b></span>' +
-      '</div>' +
-      '<div class="tl">' + items + '</div>';
+    return '<div class="row between mb14"><span class="badge">' + ICON.wrench + svs.length + ' servicio(s)</span><span class="small muted">Total: <b class="mono">' + money(total) + '</b></span></div><div class="tl">' + items + '</div>';
   }
 
   function panelPropietario(v, cli) {
     if (!cli) {
       var ult = ultimoDuenoRegistrado(v);
-      return '<div class="alert">' + ICON.alert +
-        '<div><b>Propietario desconocido.</b><br>El vehículo está activo pero no tiene titular asociado.' +
-        (ult ? ' Último titular registrado: <b>' + esc(ult) + '</b>.' : '') +
-        ' Podés asignarle uno o mantenerlo desafiliado.</div>' +
-        '</div>' +
+      return '<div class="alert">' + ICON.alert + '<div><b>Propietario desconocido.</b>' + (ult ? ' Último titular: ' + esc(ult) : '') + '</div></div>' +
         '<button class="btn primary full mt14" data-act="transferir" data-vehiculo="' + esc(v.id) + '">' + ICON.swap + ' Asignar titular</button>';
     }
-    return '<div class="owner" style="background:#fff;align-items:center">' +
-        '<div class="avatar">' + esc(iniciales(cli.nombre)) + '</div>' +
-        '<div style="flex:1;min-width:0">' +
-          '<div class="strong">' + esc(cli.nombre) + '</div>' +
-          '<div class="small muted">Titular actual desde ' + (cli.desde ? fecha(cli.desde) : '—') + '</div>' +
-        '</div>' +
-        '<span class="badge ok">' + ICON.check + ' Titular</span>' +
-      '</div>' +
-      '<dl class="mt14">' +
-        kv('DNI / CUIT', '<span class="mono">' + esc(cli.dni) + '</span>') +
-        kv('Teléfono', cli.telefono ? '<a href="tel:' + esc(cli.telefono.replace(/[^\d+]/g, '')) + '">' + esc(cli.telefono) + '</a>' : '<span class="muted">Sin datos</span>') +
-        kv('Email', cli.email ? esc(cli.email) : '<span class="muted">Sin datos</span>') +
-        kv('Vehículo', esc(v.marca + ' ' + v.modelo + ' (' + (v.anio || '—') + ')')) +
-        kv('N° motor / chasis', '<span class="mono">' + esc(v.motor || '—') + '</span>') +
-        kv('Kilometraje', v.km ? num(v.km) + ' km' : '—') +
-      '</dl>' +
-      '<div class="row mt18" style="flex-wrap:wrap">' +
-        '<button class="btn" data-act="ver-cliente" data-cliente="' + esc(cli.id) + '">' + ICON.user + ' Ver ficha completa</button>' +
-        '<button class="btn danger" data-act="transferir" data-vehiculo="' + esc(v.id) + '">' + ICON.swap + ' Transferir Titularidad</button>' +
-        '<button class="btn danger" data-act="transferir" data-vehiculo="' + esc(v.id) + '" data-sin-titular="1">' + ICON.user + ' Desafiliar (Propietario desconocido)</button>' +
-      '</div>';
-  }
-
-  function kv(k, v) {
-    return '<div class="kv"><dt>' + esc(k) + '</dt><dd>' + v + '</dd></div>';
+    return '<div class="owner" style="background:#fff"><div class="avatar">' + esc(iniciales(cli.nombre)) + '</div><div style="flex:1"><div class="strong">' + esc(cli.nombre) + '</div><div class="small muted">DNI ' + esc(cli.dni) + '</div></div></div>' +
+      '<div class="row mt18"><button class="btn" data-act="ver-cliente" data-cliente="' + esc(cli.id) + '">' + ICON.user + ' Ver ficha</button><button class="btn danger" data-act="transferir" data-vehiculo="' + esc(v.id) + '">' + ICON.swap + ' Transferir</button></div>';
   }
 
   function panelDuenos(v) {
     var duenos = (v.duenos || []).slice().reverse();
     var cli = clientePorId(v.clienteId);
-
-    var html = '';
-    if (cli) {
-      html += '<p class="xsmall muted" style="margin-bottom:9px;text-transform:uppercase;letter-spacing:.6px;font-weight:700">Titular actual</p>' +
-        '<div class="owner" style="border-color:#bfdbfe;background:#eff6ff">' +
-          '<div class="avatar">' + esc(iniciales(cli.nombre)) + '</div>' +
-          '<div style="flex:1;min-width:0">' +
-            '<div class="strong">' + esc(cli.nombre) + '</div>' +
-            '<div class="small muted">DNI ' + esc(cli.dni) + ' · desde ' + (v.fechaAlta ? fecha(v.fechaAlta) : 'registro actual') + '</div>' +
-          '</div>' +
-          '<span class="badge ok">Actual</span>' +
-        '</div>';
-    }
-
-    html += '<p class="xsmall muted mt18" style="margin-bottom:9px;text-transform:uppercase;letter-spacing:.6px;font-weight:700">Propietarios anteriores</p>';
-    if (!duenos.length) {
-      html += '<div class="empty" style="padding:22px 10px">' + ICON.clock +
-        '<h3>Sin dueños anteriores</h3><p>Este vehículo siempre estuvo a nombre del titular actual.</p></div>';
-    } else {
-      html += duenos.map(function (d) {
-        return '<div class="owner">' +
-          '<div class="avatar">' + esc(iniciales(d.nombre)) + '</div>' +
-          '<div style="flex:1;min-width:0">' +
-            '<div class="strong">' + esc(d.nombre) + '</div>' +
-            '<div class="small muted">DNI ' + esc(d.dni) + '</div>' +
-            '<div class="xsmall muted mt6">' + fecha(d.desde) + ' → ' + fecha(d.hasta) + '</div>' +
-          '</div>' +
-          '<span class="badge off">Anterior</span>' +
-        '</div>';
-      }).join('');
-    }
-    return html;
+    var html = cli ? '<div class="owner" style="background:#eff6ff"><div class="avatar">' + esc(iniciales(cli.nombre)) + '</div><div style="flex:1"><div class="strong">' + esc(cli.nombre) + '</div><div class="small muted">Titular actual</div></div></div>' : '';
+    if (!duenos.length) return html + '<div class="empty"><h3>Sin dueños anteriores</h3></div>';
+    return html + duenos.map(function (d) {
+      return '<div class="owner mt10"><div class="avatar">' + esc(iniciales(d.nombre)) + '</div><div style="flex:1"><div class="strong">' + esc(d.nombre) + '</div><div class="small muted">' + fecha(d.desde) + ' → ' + fecha(d.hasta) + '</div></div></div>';
+    }).join('');
   }
 
   /* ==========================================================
-     6. Búsqueda dual e inteligente (input único)
+     6. Buscador Dual
      ========================================================== */
   function buscar(raw, tipoForzado) {
     var q = String(raw || '').trim();
-    if (!q) { mostrarTodo(tipoForzado || estado.tipo); return; }   /* sin término: listar todo por tipo */
+    if (!q) { mostrarTodo(tipoForzado || estado.tipo); return; }
 
     var tipo = tipoForzado || estado.tipo;
     if (tipo === 'auto') tipo = detectarTipo(q);
 
-    /* Búsqueda por DNI */
     if (tipo === 'dni') {
       var cli = clientePorDni(q);
       if (cli) { abrirCliente(cli.id); return; }
       var parcialDni = DB.clientes.filter(function (c) { return norm(c.dni).indexOf(norm(q)) !== -1; });
       if (parcialDni.length === 1) { abrirCliente(parcialDni[0].id); return; }
       if (parcialDni.length > 1) { renderLista('clientes', parcialDni); return; }
-
-      /* Fallback: quizás era una patente numérica */
       var vFallback = vehiculoPorPatente(q);
       if (vFallback) { abrirVehiculo(vFallback.id); return; }
       renderSinResultados(q);
       return;
     }
 
-    /* Búsqueda por patente */
     var veh = vehiculoPorPatente(q);
     if (veh) { abrirVehiculo(veh.id); return; }
-
     var parciales = DB.vehiculos.filter(function (v) { return norm(v.patente).indexOf(norm(q)) !== -1; });
     if (parciales.length === 1) { abrirVehiculo(parciales[0].id); return; }
     if (parciales.length > 1) { renderLista('vehiculos', parciales); return; }
 
-    /* Si no hubo coincidencias como patente, probar como DNI */
     var cli2 = clientePorDni(q);
     if (cli2) { abrirCliente(cli2.id); return; }
     renderSinResultados(q);
   }
 
   function renderLista(kind, items, titulo) {
-    estado.vista = 'inicio'; estado.clienteId = null; estado.vehiculoId = null;
-    var t = kind === 'clientes' ? 'clientes' : 'vehículos';
-    var html = '<div class="section"><div class="sec-head"><h2>' + esc(titulo || ('Coincidencias (' + t + ')')) + '</h2>' +
-      '<span class="count gray">' + items.length + '</span></div><div class="card fade-in">';
+    estado.vista = 'inicio';
+    var html = '<div class="section"><div class="sec-head"><h2>' + esc(titulo || 'Coincidencias') + '</h2><span class="count gray">' + items.length + '</span></div><div class="card fade-in">';
     if (kind === 'clientes') {
       html += items.map(function (c) {
-        var r = vehiculosDeCliente(c);
-        return '<div class="veh"><div class="veh-ico">' + ICON.user + '</div><div class="veh-body">' +
-          '<div class="veh-title"><strong>' + esc(c.nombre) + '</strong><span class="badge">DNI ' + esc(c.dni) + '</span></div>' +
-          '<div class="veh-sub">' + r.activos.length + ' vehículo(s) activo(s) · ' + esc(c.telefono || 'sin teléfono') + '</div>' +
-          '<div class="veh-actions"><button class="btn sm primary" data-act="ver-cliente" data-cliente="' + esc(c.id) + '">' + ICON.search + ' Abrir ficha</button></div>' +
-        '</div></div>';
+        return '<div class="veh"><div class="veh-ico">' + ICON.user + '</div><div class="veh-body"><div class="veh-title"><strong>' + esc(c.nombre) + '</strong><span class="badge">DNI ' + esc(c.dni) + '</span></div><div class="veh-actions"><button class="btn sm primary" data-act="ver-cliente" data-cliente="' + esc(c.id) + '">Abrir ficha</button></div></div></div>';
       }).join('');
     } else {
       html += items.map(function (v) { return vehRow(v, v.estado === 'historico'); }).join('');
@@ -621,26 +473,16 @@
     RESULTS.innerHTML = html;
   }
 
-  /* Listado completo cuando no hay término de búsqueda */
   function mostrarTodo(tipo) {
-    if (tipo === 'patente') {
-      var vs = DB.vehiculos.slice().sort(function (a, b) { return a.patente.localeCompare(b.patente); });
-      renderLista('vehiculos', vs, 'Todos los vehículos registrados');
-    } else if (tipo === 'dni') {
-      var cs = DB.clientes.slice().sort(function (a, b) { return a.nombre.localeCompare(b.nombre); });
-      renderLista('clientes', cs, 'Todos los clientes registrados');
-    } else {
-      renderInicio();
-    }
+    if (tipo === 'patente') renderLista('vehiculos', DB.vehiculos, 'Todos los vehículos');
+    else if (tipo === 'dni') renderLista('clientes', DB.clientes, 'Todos los clientes');
+    else renderInicio();
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
   function irAlInicio() {
     estado.vista = 'inicio'; estado.clienteId = null; estado.vehiculoId = null; estado.tipo = 'auto';
-    $$('.chip').forEach(function (c) { c.classList.toggle('active', c.dataset.type === 'auto'); });
     $('#q').value = '';
-    $('#q').placeholder = 'Ingrese Patente o DNI del cliente...';
-    try { if (location.hash) history.replaceState(null, '', location.pathname + location.search); } catch (e) {}
     renderInicio();
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
@@ -666,18 +508,15 @@
   }
 
   /* ==========================================================
-     7. Modales
+     7. Modales y Operaciones
      ========================================================== */
   var abierto = null;
-
   function abrirModal(id) {
     var m = $(id);
     if (!m) return;
     m.classList.add('open');
     abierto = m;
     document.body.style.overflow = 'hidden';
-    var foco = m.querySelector('input, select, textarea, button');
-    if (foco && window.innerWidth > 720) setTimeout(function () { foco.focus(); }, 60);
   }
   function cerrarModal() {
     if (!abierto) return;
@@ -691,316 +530,131 @@
     t.className = 'toast' + (esError ? ' err' : '');
     t.innerHTML = (esError ? ICON.alert : ICON.check) + '<span>' + esc(msg) + '</span>';
     $('#toasts').appendChild(t);
-    setTimeout(function () {
-      t.style.transition = 'opacity .25s ease, transform .25s ease';
-      t.style.opacity = '0'; t.style.transform = 'translateY(10px)';
-      setTimeout(function () { t.remove(); }, 260);
-    }, 3200);
+    setTimeout(function () { t.remove(); }, 3200);
   }
 
-  /* ---------- Modal Nueva Orden de Trabajo ---------- */
-  /* Si llega vehiculoId, el select preselecciona ese auto (flujo por tarjeta
-     del cliente). Si llega sólo clienteId, se priorizan los ACTIVOS de ese
-     cliente al tope del listado. Cada vehículo activo admite su propia OT. */
   function abrirOT(vehiculoId, clienteId) {
-    estado.ctx = { clienteId: clienteId || null };
     var sel = $('#ot-vehiculo');
-    var lista = DB.vehiculos.slice().sort(function (a, b) { return a.patente.localeCompare(b.patente); });
-    if (clienteId) {
-      var delCliente = lista.filter(function (v) { return v.clienteId === clienteId; });
-      if (delCliente.length) lista = delCliente.concat(lista.filter(function (v) { return v.clienteId !== clienteId; }));
-    }
-    sel.innerHTML = '<option value="">Seleccioná un vehículo…</option>' + lista.map(function (v) {
-      var marcador = (clienteId && v.clienteId === clienteId && v.estado !== 'historico') ? '· activo' : '';
-      return '<option value="' + esc(v.id) + '">' + esc(v.patente + ' — ' + v.marca + ' ' + v.modelo + ' (' + (v.anio || '—') + ') ' + (marcador ? marcador : '')) + '</option>';
+    sel.innerHTML = DB.vehiculos.map(function (v) {
+      return '<option value="' + esc(v.id) + '">' + esc(v.patente + ' — ' + v.marca + ' ' + v.modelo) + '</option>';
     }).join('');
     if (vehiculoId) sel.value = vehiculoId;
-
-    var v = vehiculoId ? vehiculoPorId(vehiculoId) : null;
-    $('#ot-sub').textContent = v ? 'Vehículo: ' + v.patente + ' · ' + v.marca + ' ' + v.modelo : 'Cargá los datos del servicio realizado';
     $('#ot-fecha').value = hoy();
-    $('#ot-km').value = v && v.km ? v.km : '';
     $('#ot-mano').value = 0;
     $('#ot-obs').value = '';
-
-    $('#ot-tareas').innerHTML = TAREAS_SUGERIDAS.map(function (t) {
-      return '<label class="check"><input type="checkbox" value="' + esc(t) + '">' + esc(t) + '</label>';
-    }).join('');
-
+    $('#ot-tareas').innerHTML = TAREAS_SUGERIDAS.map(function (t) { return '<label class="check"><input type="checkbox" value="' + esc(t) + '">' + esc(t) + '</label>'; }).join('');
     $('#ot-repuestos').innerHTML = '';
-    agregarRepuesto();
     calcularTotal();
     abrirModal('#modal-ot');
   }
 
-  function agregarRepuesto() {
-    var row = document.createElement('div');
-    row.className = 'rep-row mt6';
-    row.innerHTML =
-      '<input class="inp" placeholder="Repuesto" data-rep="nombre">' +
-      '<input class="inp" type="number" min="1" step="1" value="1" data-rep="cantidad" inputmode="numeric" title="Cantidad">' +
-      '<input class="inp" type="number" min="0" step="100" value="0" data-rep="precio" inputmode="numeric" title="Precio unitario">' +
-      '<button type="button" class="icon-del" data-act="del-repuesto" title="Quitar">' + ICON.trash + '</button>';
-    $('#ot-repuestos').appendChild(row);
-  }
-
-  function leerRepuestos() {
-    return $$('#ot-repuestos .rep-row').map(function (r) {
-      var n = $('[data-rep="nombre"]', r).value.trim();
-      var c = Number($('[data-rep="cantidad"]', r).value) || 0;
-      var p = Number($('[data-rep="precio"]', r).value) || 0;
-      return { nombre: n, cantidad: c, precio: p };
-    }).filter(function (r) { return r.nombre && r.cantidad > 0; });
-  }
-
-  /* Calculadora dinámica: mano de obra + repuestos agregados (cantidad × precio) */
   function calcularTotal() {
     var mano = Number($('#ot-mano').value) || 0;
-    var rep = leerRepuestos().reduce(function (a, r) { return a + r.cantidad * r.precio; }, 0);
-    $('#ot-total').textContent = money(mano + rep);
+    $('#ot-total').textContent = money(mano);
   }
 
   function guardarOT() {
     var vid = $('#ot-vehiculo').value;
     if (!vid) { toast('Seleccioná un vehículo', true); return; }
-    var fechaVal = $('#ot-fecha').value || hoy();
-    var tareas = $$('#ot-tareas input:checked').map(function (i) { return i.value; });
-    var repuestos = leerRepuestos();
-    var mano = Number($('#ot-mano').value) || 0;
-
     DB.servicios.push({
-      id: uid('srv'), vehiculoId: vid, fecha: fechaVal,
+      id: uid('srv'), vehiculoId: vid, fecha: $('#ot-fecha').value || hoy(),
       km: Number($('#ot-km').value) || null,
-      tareas: tareas, repuestos: repuestos, manoObra: mano,
+      tareas: $$('#ot-tareas input:checked').map(function (i) { return i.value; }),
+      repuestos: [], manoObra: Number($('#ot-mano').value) || 0,
       obs: $('#ot-obs').value.trim()
     });
-
-    var v = vehiculoPorId(vid);
-    if (v && Number($('#ot-km').value)) v.km = Number($('#ot-km').value);
-
-    var ok = guardar();
+    guardar();
     cerrarModal();
-    toast(ok ? 'Orden de trabajo guardada' : 'Orden guardada (sin persistencia local)');
-    if (estado.vista === 'vehiculo' && estado.vehiculoId === vid) { estado.tab = 'historial'; }
+    toast('Orden de trabajo guardada');
     refrescar();
   }
 
-  /* ---------- Modal Vehículo (asociar al cliente) ---------- */
   function abrirVehiculoModal(clienteId) {
-    var c = clientePorId(clienteId);
-    if (!c) return;
     estado.ctx = { clienteId: clienteId };
-    $('#veh-sub').textContent = 'Se vinculará a ' + c.nombre + ' (DNI ' + c.dni + ')';
     $('#vehForm').reset();
-    $('#v-anio').value = new Date().getFullYear();
     abrirModal('#modal-vehiculo');
   }
 
   function guardarVehiculo() {
-    var form = $('#vehForm');
-    if (!form.reportValidity()) return;
     var patente = norm($('#v-patente').value);
-    if (patente.length < 5) { toast('La patente parece incompleta', true); return; }
-    if (vehiculoPorPatente(patente)) { toast('Ya existe un vehículo con esa patente', true); return; }
-
-    /* Siempre nace 'activo': el cliente puede acumular varios activos. */
+    if (!patente) { toast('Ingresá una patente válida', true); return; }
     var v = {
-      id: uid('veh'),
-      patente: patente,
-      marca: $('#v-marca').value.trim() || 'Sin marca',
-      modelo: $('#v-modelo').value.trim() || 'Sin modelo',
-      anio: Number($('#v-anio').value) || null,
-      color: $('#v-color').value.trim(),
-      km: Number($('#v-km').value) || null,
-      motor: $('#v-motor').value.trim(),
-      clienteId: estado.ctx.clienteId || null,
-      estado: 'activo',
-      fechaAlta: hoy(),
-      duenos: []
+      id: uid('veh'), patente: patente, marca: $('#v-marca').value.trim() || 'Sin marca',
+      modelo: $('#v-modelo').value.trim() || 'Sin modelo', anio: Number($('#v-anio').value) || null,
+      clienteId: estado.ctx.clienteId || null, estado: 'activo', duenos: []
     };
     DB.vehiculos.push(v);
-    var ok = guardar();
+    guardar();
     cerrarModal();
-    toast(ok ? 'Vehículo asociado correctamente' : 'Vehículo asociado (sin persistencia local)');
-    estado.vista = 'vehiculo'; estado.vehiculoId = v.id; estado.tab = 'historial';
-    refrescar();
+    toast('Vehículo asociado');
+    abrirVehiculo(v.id);
   }
 
-  /* ---------- Modal Transferencia de titularidad ---------- */
   function abrirTransfer(vehiculoId, sinTitular) {
-    var v = vehiculoPorId(vehiculoId);
-    if (!v) return;
     estado.ctx = { vehiculoId: vehiculoId };
     $('#trForm').reset();
     $('#tr-fecha').value = hoy();
-    $('#tr-sin-titular').checked = !!sinTitular;
-    alternarDatosTitular();
-    $('#tr-sub').textContent = 'Vehículo ' + v.patente + ' · titular actual: ' + nombrePropietario(v);
     abrirModal('#modal-transfer');
   }
 
-  /* Con “Propietario desconocido” los datos del nuevo titular no aplican */
-  function alternarDatosTitular() {
-    var off = $('#tr-sin-titular').checked;
-    var datos = $('#tr-datos');
-    if (datos) datos.style.display = off ? 'none' : '';
-    $$('#tr-datos input').forEach(function (i) { i.disabled = off; });
-  }
-
   function guardarTransfer() {
-    var sinTitular = $('#tr-sin-titular').checked;
-    var form = $('#trForm');
-    if (!sinTitular && !form.reportValidity()) return;
     var v = vehiculoPorId(estado.ctx.vehiculoId);
     if (!v) return;
-
-    var f = $('#tr-fecha').value || hoy();
-
-    /* El titular saliente queda registrado en el historial del vehículo:
-       es lo que hace que aparezca en "Histórico de Vehículos Anteriores". */
-    if (v.clienteId) {
-      var actual = clientePorId(v.clienteId);
-      if (actual) {
-        v.duenos = v.duenos || [];
-        v.duenos.push({ nombre: actual.nombre, dni: actual.dni, desde: actual.desde || v.fechaAlta || '—', hasta: f });
-      }
-    }
-
-    /* Desafiliar: el vehículo queda activo y sin propietario */
-    if (sinTitular) {
-      v.clienteId = null;
-      v.estado = 'activo';
-      var okOff = guardar();
-      cerrarModal();
-      estado.ctx = {};
-      estado.tab = 'propietario';
-      toast(okOff
-        ? v.patente + ' desafiliado: queda como “Propietario desconocido”'
-        : v.patente + ' desafiliado (sin persistencia local)');
-      abrirVehiculo(v.id);
-      return;
-    }
-
     var dni = norm($('#tr-dni').value);
     var nombre = $('#tr-nombre').value.trim();
-    var tel = $('#tr-tel').value.trim();
-
-    /* Nuevo titular: reutilizar su ficha o crearla */
-    var nuevo = clientePorDni(dni);
-    if (!nuevo) {
-      nuevo = { id: uid('cli'), nombre: nombre, dni: dni, telefono: tel, email: '', desde: f };
-      DB.clientes.push(nuevo);
-    } else if (nombre) {
-      nuevo.nombre = nombre;
-      if (tel && !nuevo.telefono) nuevo.telefono = tel;
-    }
-
+    var nuevo = clientePorDni(dni) || { id: uid('cli'), nombre: nombre, dni: dni, desde: hoy() };
+    if (!clientePorDni(dni)) DB.clientes.push(nuevo);
     v.clienteId = nuevo.id;
     v.estado = 'activo';
-    var ok = guardar();
+    guardar();
     cerrarModal();
-    toast(ok ? 'Titularidad transferida a ' + nuevo.nombre : 'Titularidad transferida (sin persistencia local)');
-    estado.vista = 'vehiculo'; estado.vehiculoId = v.id; estado.tab = 'propietario';
+    toast('Titularidad transferida');
     refrescar();
   }
 
-  /* ---------- Modal Cliente ---------- */
   function abrirClienteModal() {
     $('#clForm').reset();
     abrirModal('#modal-cliente');
   }
   function guardarCliente() {
-    var form = $('#clForm');
-    if (!form.reportValidity()) return;
     var dni = norm($('#c-dni').value);
-    if (clientePorDni(dni)) { toast('Ya existe un cliente con ese DNI', true); return; }
-    var c = {
-      id: uid('cli'), nombre: $('#c-nombre').value.trim(), dni: dni,
-      telefono: $('#c-tel').value.trim(), email: $('#c-email').value.trim(), desde: hoy()
-    };
+    if (!dni) { toast('Ingresá un DNI', true); return; }
+    var c = { id: uid('cli'), nombre: $('#c-nombre').value.trim(), dni: dni, desde: hoy() };
     DB.clientes.push(c);
-    var ok = guardar();
+    guardar();
     cerrarModal();
-    toast(ok ? 'Cliente registrado' : 'Cliente registrado (sin persistencia local)');
+    toast('Cliente registrado');
     abrirCliente(c.id);
   }
 
-  /* ==========================================================
-     7.b Eliminar registros (con confirmación)
-     ========================================================== */
   function abrirEliminar(kind, id) {
-    var msg = '', sub = 'Esta acción no se puede deshacer';
-
-    if (kind === 'cliente') {
-      var c = clientePorId(id);
-      if (!c) return;
-      var r = vehiculosDeCliente(c);
-      if (r.activos.length) {
-        toast('No se puede eliminar: ' + c.nombre + ' tiene ' + r.activos.length + ' vehículo(s) activo(s). Transferí la titularidad primero.', true);
-        return;
-      }
-      estado.ctx = { eliminar: { kind: 'cliente', id: id } };
-      $('#del-title').textContent = 'Eliminar cliente';
-      sub = c.nombre + ' · DNI ' + c.dni;
-      msg = 'Se eliminará la ficha de <b>' + esc(c.nombre) + '</b> (DNI ' + esc(c.dni) + ').' +
-        (r.historicos.length
-          ? ' Sus ' + r.historicos.length + ' vehículo(s) histórico(s) seguirán existiendo, pero quedarán <b>sin titular asociado</b>.'
-          : '') +
-        ' Las órdenes de trabajo ya cargadas no se borran.';
-    } else {
-      var v = vehiculoPorId(id);
-      if (!v) return;
-      var svs = serviciosDe(v.id);
-      estado.ctx = { eliminar: { kind: 'vehiculo', id: id } };
-      $('#del-title').textContent = 'Eliminar vehículo';
-      sub = v.patente + ' · ' + v.marca + ' ' + v.modelo;
-      msg = 'Se eliminará <b>' + esc(v.patente) + ' — ' + esc(v.marca + ' ' + v.modelo) + '</b>' +
-        (svs.length ? ' junto con sus <b>' + svs.length + ' orden(es) de trabajo</b>' : '') + '.' +
-        (v.clienteId ? ' El titular ' + esc(nombrePropietario(v)) + ' quedará sin este vehículo.' : '');
-    }
-
-    $('#del-sub').textContent = sub;
-    $('#del-msg').innerHTML = msg;
+    estado.ctx = { eliminar: { kind: kind, id: id } };
+    $('#del-title').textContent = 'Eliminar ' + kind;
+    $('#del-msg').textContent = '¿Confirmás la eliminación del registro?';
     abrirModal('#modal-eliminar');
   }
 
   function confirmarEliminar() {
     var e = estado.ctx.eliminar;
-    if (!e) { cerrarModal(); return; }
-    var eraCliente = e.kind === 'cliente';
-    var cliAfectado = null;
-
-    if (eraCliente) {
-      DB.clientes = DB.clientes.filter(function (c) { return c.id !== e.id; });
-      DB.vehiculos.forEach(function (v) { if (v.clienteId === e.id) v.clienteId = null; });
-    } else {
-      var v = vehiculoPorId(e.id);
-      cliAfectado = v ? v.clienteId : null;
-      DB.vehiculos = DB.vehiculos.filter(function (x) { return x.id !== e.id; });
-      DB.servicios = DB.servicios.filter(function (s) { return s.vehiculoId !== e.id; });
-    }
-
-    var ok = guardar();
+    if (e.kind === 'cliente') DB.clientes = DB.clientes.filter(function (c) { return c.id !== e.id; });
+    else DB.vehiculos = DB.vehiculos.filter(function (v) { return v.id !== e.id; });
+    guardar();
     cerrarModal();
-    estado.ctx = {};
-    toast((eraCliente ? 'Cliente eliminado' : 'Vehículo eliminado') + (ok ? '' : ' (sin persistencia local)'));
-
-    if (eraCliente) { irAlInicio(); return; }
-    estado.vehiculoId = null;
-    if (cliAfectado && clientePorId(cliAfectado)) abrirCliente(cliAfectado);
-    else { estado.vista = 'inicio'; renderInicio(); }
+    toast('Registro eliminado');
+    irAlInicio();
   }
 
   /* ==========================================================
-     8. Escáner (cámara getUserMedia + BarcodeDetector opcional)
+     8. Escáner de Cámara + OCR (Tesseract.js)
      ========================================================== */
-  var stream = null, detectLoop = null, detector = null;
+  var stream = null;
+  var ocrSeq = 0;              /* invalida lecturas OCR huérfanas al cerrar/cambiar de modal */
 
   function detenerCamara() {
-    if (detectLoop) { cancelAnimationFrame(detectLoop); detectLoop = null; }
     if (stream) { stream.getTracks().forEach(function (t) { t.stop(); }); stream = null; }
     var vid = $('#scan-video');
     if (vid) vid.srcObject = null;
+    ocrSeq++;                  /* toda OCR en curso queda descartada y no toca la UI */
   }
 
   function abrirEscaner() {
@@ -1021,8 +675,8 @@
     msg.textContent = 'Iniciando cámara…';
 
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      msg.textContent = 'Cámara no disponible en este navegador';
-      notaScan('Tu navegador no expone la cámara (o estás en un contexto no seguro). Usá la lectura manual de abajo.');
+      msg.textContent = 'Cámara no disponible';
+      notaScan('Cámara no accesible en este navegador. Usá el campo manual.');
       return;
     }
 
@@ -1031,42 +685,136 @@
         stream = s;
         video.srcObject = s;
         video.play().catch(function () {});
-        msg.textContent = 'Apuntá al código / patente dentro del recuadro';
-
-        if ('BarcodeDetector' in window) {
-          try {
-            detector = new window.BarcodeDetector();
-            notaScan('Detección de códigos activa. También podés usar “Capturar y leer” para una lectura puntual.');
-            bucleDeteccion();
-          } catch (e) {
-            notaScan('Escáner nativo no disponible. Podés usar la lectura manual o completar el campo de búsqueda.');
-          }
-        } else {
-          notaScan('Este navegador no soporta detección automática de códigos. La vista previa queda activa: usá la lectura manual o escribí el dato en el buscador.');
-        }
+        msg.textContent = 'Apuntá la patente o DNI dentro del recuadro';
+        notaScan('Presioná "Capturar y leer" para procesar el texto impreso en la chapa o documento.');
       })
       .catch(function () {
         msg.textContent = 'No se pudo acceder a la cámara';
-        notaScan('Permiso denegado o cámara ocupada. Podés escribir la patente o el DNI manualmente abajo.');
+        notaScan('Permiso denegado. Podés ingresar la patente o DNI manualmente abajo.');
       });
   }
 
-  function bucleDeteccion() {
+  /* ==========================================================
+     Carga dinámica del motor OCR (Tesseract.js v5) desde su CDN.
+     - Se inyecta una sola vez: los clicks repetidos reutilizan la misma descarga.
+     - cb(error) reporta el resultado; un timeout de 20 s evita dejar
+       al usuario colgado si la red no responde.
+     ========================================================== */
+  var TESSERACT_CDN = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+  var tesseractEstado = 'no-iniciado';   // no-iniciado | cargando | listo | error
+  var tesseractCola = [];                // callbacks esperando la carga
+
+  function cargarTesseract(cb) {
+    if (window.Tesseract) { tesseractEstado = 'listo'; cb(null); return; }
+
+    if (tesseractEstado === 'cargando') { tesseractCola.push(cb); return; }
+
+    tesseractEstado = 'cargando';
+    tesseractCola.push(cb);
+    notaScan('Descargando el motor de lectura (OCR), se hace una sola vez…');
+
+    function terminar(err) {
+      tesseractEstado = err ? 'error' : 'listo';
+      var pendientes = tesseractCola.slice();
+      tesseractCola = [];
+      pendientes.forEach(function (f) { f(err || null); });
+    }
+
+    var script = document.createElement('script');
+    script.src = TESSERACT_CDN;
+    script.async = true;
+
+    var temporizador = setTimeout(function () {
+      if (window.Tesseract) { terminar(null); return; }
+      terminar(new Error('timeout'));
+      toast('El motor OCR tardó demasiado en descargar', true);
+      notaScan('No se pudo descargar el OCR (red lenta o sin internet). Usá la lectura manual de abajo o reintentá.');
+    }, 20000);
+
+    script.onload = function () {
+      clearTimeout(temporizador);
+      if (window.Tesseract) terminar(null);
+      else terminar(new Error('carga incompleta'));
+    };
+    script.onerror = function () {
+      clearTimeout(temporizador);
+      terminar(new Error('no se pudo descargar'));
+      toast('Error al cargar el motor OCR. Verificá tu conexión a internet.', true);
+      notaScan('No se pudo descargar Tesseract.js desde el CDN. Usá la lectura manual de abajo o reintentá.');
+    };
+
+    document.head.appendChild(script);
+  }
+
+  /* ==========================================================
+     Captura de fotograma + OCR + búsqueda automática
+     ========================================================== */
+  function capturarYLeer() {
     var video = $('#scan-video');
-    detectLoop = requestAnimationFrame(function tick() {
-      if (!stream) return;
-      if (video.readyState >= 2 && detector) {
-        detector.detect(video).then(function (codes) {
-          if (codes && codes.length) {
-            var val = codes[0].rawValue || '';
-            usarLectura(val);
-            return;
-          }
-          detectLoop = requestAnimationFrame(tick);
-        }).catch(function () { detectLoop = requestAnimationFrame(tick); });
-      } else {
-        detectLoop = requestAnimationFrame(tick);
+    var msg = $('#scan-msg');
+
+    if (!stream || !video || video.readyState < 2) {
+      toast('La cámara no está activa: abrí el escáner de nuevo.', true);
+      return;
+    }
+
+    /* Cada lectura tiene un número de turno: si el usuario cierra el
+       modal a mitad de camino, el resultado tardío se descarta. */
+    ocrSeq++;
+    var turno = ocrSeq;
+
+    /* 1) Fotograma actual del <video> dibujado en un canvas interno.
+       Se limita el tamaño (ancho máx. 1600 px) para que el OCR no arrastre. */
+    var ancho = video.videoWidth || 640;
+    var alto = video.videoHeight || 480;
+    var escala = Math.min(1, 1600 / ancho);
+    var canvas = document.createElement('canvas');
+    canvas.width = Math.round(ancho * escala);
+    canvas.height = Math.round(alto * escala);
+    canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    /* 2) Motor OCR: cargar (una vez) y reconocer con progreso en vivo */
+    msg.textContent = 'Preparando el motor de lectura (OCR)…';
+
+    cargarTesseract(function (err) {
+      if (turno !== ocrSeq) return;          /* se cerró el escáner mientras tanto */
+      if (err) {
+        msg.textContent = 'No se pudo cargar el OCR';
+        $('#scan-manual').focus();
+        return;
       }
+
+      window.Tesseract.recognize(canvas, 'eng', {
+        logger: function (m) {
+          if (turno !== ocrSeq || !m) return;
+          var p = Math.round((m.progress || 0) * 100);
+          if (m.status === 'loading tesseract core' || m.status === 'initializing tesseract') {
+            msg.textContent = 'Iniciando el motor OCR… ' + p + '%';
+          } else if (m.status === 'loading language traineddata') {
+            msg.textContent = 'Preparando el inglés (eng)… ' + p + '%';
+          } else if (m.status === 'recognizing text') {
+            msg.textContent = 'Leyendo texto… ' + p + '%';
+          }
+        }
+      }).then(function (res) {
+        if (turno !== ocrSeq) return;
+        var textoBruto = res && res.data ? (res.data.text || '') : '';
+        var dato = extraerPatenteOTexto(textoBruto);
+
+        /* 3) Con coincidencia limpia: cerrar, volcar en #q y buscar */
+        if (dato) { usarLectura(dato); return; }
+
+        /* 4) Lectura poco clara: guiar al usuario sin cerrar el modal */
+        msg.textContent = 'Lectura poco clara';
+        notaScan('No se detectó una patente o DNI legible. Enfocá de nuevo con buena luz y la chapa bien encuadrada, pulsá "Capturar y leer" otra vez, o usá la lectura manual.');
+        toast('No se pudo extraer un dato claro. Probá de nuevo o usá la lectura manual.', true);
+      }).catch(function (e) {
+        if (turno !== ocrSeq) return;
+        console.error('OCR:', e);
+        msg.textContent = 'Error durante la lectura';
+        notaScan('El procesamiento de imagen falló. Probá de nuevo o ingresá el dato manualmente.');
+        toast('Error durante la lectura de la imagen.', true);
+      });
     });
   }
 
@@ -1078,73 +826,8 @@
     buscar(v, estado.tipo);
   }
 
-  function capturarYLeer() {
-    var video = $('#scan-video');
-    if (detector && stream && video.readyState >= 2) {
-      detector.detect(video).then(function (codes) {
-        if (codes && codes.length) usarLectura(codes[0].rawValue);
-        else { toast('No se detectó ningún código. Probá acercar o usar la lectura manual.', true); }
-      }).catch(function () {
-        toast('Lectura no disponible. Usá la lectura manual o el buscador.', true);
-      });
-      return;
-    }
-    toast('Sin detección automática disponible: ingresá el dato manualmente.', true);
-    var man = $('#scan-manual');
-    if (man && !man.value) man.focus();
-  }
-
   /* ==========================================================
-     8.b Tema (automático / claro / oscuro) en sync con el script
-         anti-parpadeo del <head> (misma clave taller_tema)
-     ========================================================== */
-  var TEMA_KEY = 'taller_tema';
-
-  function sistemaOscuro() {
-    try { return !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches); }
-    catch (e) { return false; }
-  }
-
-  /* Aplica el modo y lo persiste. 'auto' deja decidir al sistema operativo. */
-  function aplicarTema(modo) {
-    if (modo !== 'light' && modo !== 'dark' && modo !== 'auto') modo = 'light';
-    estado.tema = modo;
-    document.documentElement.setAttribute('data-theme', modo);
-    try { localStorage.setItem(TEMA_KEY, modo); } catch (e) {}
-    $$('input[name="tema"]').forEach(function (r) { r.checked = (r.value === modo); });
-    actualizarBotonTema();
-  }
-
-  function actualizarBotonTema() {
-    var modo = estado.tema || 'auto';
-    var efectivo = modo === 'dark' || (modo === 'auto' && sistemaOscuro());
-    var ico = $('#tema-icono');
-    if (ico) ico.innerHTML = modo === 'auto' ? ICON.temaAuto : (modo === 'dark' ? ICON.moon : ICON.sun);
-    var btn = $('#btn-tema');
-    if (btn) {
-      var txt = modo === 'auto'
-        ? 'Automático (' + (efectivo ? 'oscuro' : 'claro') + ' según el sistema)'
-        : (modo === 'dark' ? 'Oscuro' : 'Claro');
-      btn.title = 'Tema: ' + txt;
-      btn.setAttribute('aria-label', 'Cambiar tema. Actual: ' + txt);
-    }
-  }
-
-  function abrirTema() {
-    $$('input[name="tema"]').forEach(function (r) { r.checked = (r.value === (estado.tema || 'auto')); });
-    abrirModal('#modal-tema');
-  }
-
-  /* Si el usuario dejó "Automático", seguimos el cambio del sistema en vivo */
-  if (window.matchMedia) {
-    var mqTema = window.matchMedia('(prefers-color-scheme: dark)');
-    var alCambiarSistema = function () { if ((estado.tema || 'auto') === 'auto') actualizarBotonTema(); };
-    if (mqTema.addEventListener) mqTema.addEventListener('change', alCambiarSistema);
-    else if (mqTema.addListener) mqTema.addListener(alCambiarSistema);
-  }
-
-  /* ==========================================================
-     9. Delegación de eventos centralizada (data-act)
+     9. Delegación de Eventos
      ========================================================== */
   var ACCIONES = {
     chip: function (el) {
@@ -1152,13 +835,12 @@
       $$('.chip').forEach(function (c) { c.classList.toggle('active', c.dataset.type === estado.tipo); });
       var q = $('#q').value.trim();
       if (q) buscar(q, null);
-      else mostrarTodo(estado.tipo);   /* sin texto: listar todo por tipo */
+      else mostrarTodo(estado.tipo);
     },
     home: function () { irAlInicio(); },
     'eliminar-registro': function (el) { abrirEliminar(el.dataset.kind, el.dataset.id); },
     'confirmar-eliminar': function () { confirmarEliminar(); },
     scan: function () { abrirEscaner(); },
-    tema: function () { abrirTema(); },
     capturar: function () { capturarYLeer(); },
     'usar-manual': function () {
       var v = $('#scan-manual').value.trim();
@@ -1166,34 +848,23 @@
       usarLectura(v);
     },
     'nuevo-registro': function () { abrirClienteModal(); },
-    /* Orden de trabajo: por tarjeta de vehículo activo (data-vehiculo, con
-       preselección Forzada) o genérica desde el cliente (data-cliente). */
     'nueva-ot': function (el) { abrirOT(el.dataset.vehiculo || null, el.dataset.cliente || null); },
     'nuevo-vehiculo': function (el) { abrirVehiculoModal(el.dataset.cliente); },
     transferir: function (el) { abrirTransfer(el.dataset.vehiculo, el.dataset.sinTitular === '1'); },
     'sin-titular': function () {
-      var vs = DB.vehiculos.filter(function (v) { return !v.clienteId; })
-        .sort(function (a, b) { return a.patente.localeCompare(b.patente); });
-      if (!vs.length) { toast('No hay vehículos sin titular'); return; }
-      renderLista('vehiculos', vs, 'Vehículos sin titular (propietario desconocido)');
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+      var vs = DB.vehiculos.filter(function (v) { return !v.clienteId; });
+      renderLista('vehiculos', vs, 'Vehículos sin titular');
     },
     'ver-cliente': function (el) { abrirCliente(el.dataset.cliente); },
     'ver-vehiculo': function (el) { abrirVehiculo(el.dataset.vehiculo); },
     'cerrar-modal': function () { cerrarModal(); },
-    'add-repuesto': function () { agregarRepuesto(); calcularTotal(); },
-    'del-repuesto': function (el) {
-      var row = el.closest('.rep-row');
-      if (row) row.remove();
-      calcularTotal();
-    },
     'guardar-ot': function () { guardarOT(); },
     'guardar-vehiculo': function () { guardarVehiculo(); },
     'guardar-transfer': function () { guardarTransfer(); },
     'guardar-cliente': function () { guardarCliente(); },
     tab: function (el) {
       estado.tab = el.dataset.tab;
-      $$('.tab').forEach(function (t) { t.classList.toggle('active', t === el); t.setAttribute('aria-selected', t === el); });
+      $$('.tab').forEach(function (t) { t.classList.toggle('active', t === el); });
       $$('.tabpanel').forEach(function (p) { p.classList.toggle('active', p.dataset.panel === estado.tab); });
     }
   };
@@ -1217,70 +888,9 @@
     buscar($('#q').value, null);
   });
 
-  /* Ninguna app-form debe recargar la página con Enter */
   document.addEventListener('submit', function (ev) { ev.preventDefault(); });
 
-  /* Autodetección visual del tipo mientras se escribe */
-  var tipoDetectadoTimer = null;
-  $('#q').addEventListener('input', function () {
-    var q = $('#q').value.trim();
-    if (!q) {
-      $$('.chip').forEach(function (c) { c.classList.toggle('active', c.dataset.type === 'auto'); });
-      estado.tipo = 'auto';
-      return;
-    }
-    clearTimeout(tipoDetectadoTimer);
-    tipoDetectadoTimer = setTimeout(function () {
-      if (estado.tipo !== 'auto') return;
-      var t = detectarTipo(q);
-      if (t === 'auto') return;
-      $('#q').placeholder = t === 'dni' ? 'Búsqueda por DNI detectada…' : 'Búsqueda por patente detectada…';
-      setTimeout(function () { $('#q').placeholder = 'Ingrese Patente o DNI del cliente...'; }, 1600);
-    }, 420);
-  });
-
-  /* Cálculo de total en vivo */
-  $('#ot-mano').addEventListener('input', calcularTotal);
-  $('#ot-repuestos').addEventListener('input', calcularTotal);
-
-  /* Enter en lectura manual */
-  $('#scan-manual').addEventListener('keydown', function (ev) {
-    if (ev.key === 'Enter') { ev.preventDefault(); ACCIONES['usar-manual'](); }
-  });
-
-  /* Datos del titular vs. “Propietario desconocido” */
-  $('#tr-sin-titular').addEventListener('change', alternarDatosTitular);
-
-  /* Autocompletado del nombre al escribir un DNI conocido en la transferencia */
-  $('#tr-dni').addEventListener('blur', function () {
-    var c = clientePorDni($('#tr-dni').value);
-    if (c) {
-      $('#tr-nombre').value = c.nombre;
-      if (c.telefono) $('#tr-tel').value = c.telefono;
-      toast('Cliente encontrado: se reutilizará su ficha');
-    }
-  });
-
-  /* Elección de tema desde el modal (se aplica al instante) */
-  $$('input[name="tema"]').forEach(function (r) {
-    r.addEventListener('change', function () { if (r.checked) aplicarTema(r.value); });
-  });
-
-  /* ==========================================================
-     10. Arranque
-     ========================================================== */
-  /* Tema: preferencia guardada en este dispositivo (por defecto: claro,
-     igual que el script anti-parpadeo del <head>) */
-  var temaGuardado = 'light';
-  try { temaGuardado = localStorage.getItem(TEMA_KEY) || 'light'; } catch (e) {}
-  aplicarTema(temaGuardado);
-
+  /* Arranque */
   renderInicio();
 
-  /* Deep-link simple por hash: #patente o #dni */
-  if (location.hash.length > 1) {
-    var val = decodeURIComponent(location.hash.slice(1));
-    $('#q').value = val;
-    buscar(val, null);
-  }
 })();
