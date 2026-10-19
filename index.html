@@ -175,17 +175,36 @@
     </div>
     <form class="sheet-bd" id="vehForm">
       <div class="form-grid">
+        <div class="span-2">
+          <span class="lb">Propietario</span>
+          <div class="modo-prop" role="radiogroup" aria-label="Modo de propietario">
+            <label class="modo-op"><input type="radio" name="v-modo" value="existente" checked><span>Cliente existente</span></label>
+            <label class="modo-op"><input type="radio" name="v-modo" value="nuevo"><span>Nuevo cliente</span></label>
+            <label class="modo-op"><input type="radio" name="v-modo" value="desconocido"><span>Propietario desconocido</span></label>
+          </div>
+          <small class="modo-hint" id="v-modo-hint">Asociá el vehículo a un titular ya registrado.</small>
+        </div>
         <div class="span-2" id="veh-holder">
-          <label class="lb" for="v-cliente">Propietario</label>
+          <label class="lb" for="v-cliente">Cliente titular</label>
           <select class="inp" id="v-cliente" name="propietario"></select>
         </div>
-        <label class="switch-row span-2" for="v-sin-titular" id="v-sinrow" hidden>
-          <input type="checkbox" id="v-sin-titular">
-          <span>
-            <b>Registrar como &ldquo;Propietario desconocido&rdquo;</b>
-            <small>El vehículo queda activo pero sin titular asociado: disponible para recibir órdenes de trabajo hasta que le asignes uno.</small>
-          </span>
-        </label>
+        <div class="span-2" id="veh-nuevo-holder" hidden>
+          <span class="lb">Ficha del nuevo titular</span>
+          <div class="form-grid">
+            <div>
+              <label class="lb" for="v-cli-nombre">Nombre y apellido *</label>
+              <input class="inp" id="v-cli-nombre" placeholder="Ej.: Lucía Ferraro" autocomplete="off">
+            </div>
+            <div>
+              <label class="lb" for="v-cli-dni">DNI *</label>
+              <input class="inp" id="v-cli-dni" inputmode="numeric" placeholder="Sin puntos" autocomplete="off">
+            </div>
+            <div class="span-2">
+              <label class="lb" for="v-cli-tel">Teléfono</label>
+              <input class="inp" id="v-cli-tel" inputmode="tel" placeholder="Ej.: 3764 123456" autocomplete="off">
+            </div>
+          </div>
+        </div>
         <div>
           <label class="lb" for="v-patente">Patente *</label>
           <input class="inp mono" id="v-patente" name="patente" required placeholder="AB123CD" autocapitalize="characters" spellcheck="false" maxlength="9">

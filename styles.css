@@ -704,7 +704,7 @@ main{
   color:var(--muted);
 }
 
-label.lb{
+.lb{
   display:block;margin-bottom:5px;
   font-size:12.5px;font-weight:650;color:var(--ink-2);
 }
@@ -1237,3 +1237,18 @@ select.inp{
   .nuevo-menu{min-width:200px}
   .nuevo-item{padding:12px 10px}       /* zona táctil más generosa */
 }
+
+/* El atributo hidden pierde contra display:flex: se refuerza */
+.nuevo-menu[hidden]{display:none!important}
+
+/* Selector de modo de propietario (alta de vehículo) */
+.modo-prop{display:flex;flex-wrap:wrap;gap:6px}
+.modo-op{
+  display:inline-flex;align-items:center;gap:7px;
+  padding:8px 12px;border:1px solid var(--line);border-radius:999px;
+  background:var(--panel);cursor:pointer;
+  font-size:12.5px;font-weight:650;color:var(--ink-2);
+}
+.modo-op input{width:14px;height:14px;flex:none;margin:0;accent-color:var(--brand)}
+.modo-op:has(input:checked){background:var(--brand-soft);border-color:var(--brand);color:var(--brand-text)}
+.modo-hint{display:block;margin-top:7px;font-size:11.5px;color:var(--muted)}

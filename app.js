@@ -138,9 +138,9 @@
     ],
     vehiculos: [
       { id: 'veh_1', patente: 'AB123CD', marca: 'Toyota', modelo: 'Corolla XEI 2.0', anio: 2019, color: 'Gris Plata', km: 128400, clienteId: 'cli_1', estado: 'activo', motor: '2ZR-A118842', duenos: [] },
-      { id: 'veh_2', patente: 'LKM447', marca: 'Ford', modelo: 'Fiesta Kinetic', anio: 2011, color: 'Rojo', km: 214000, clienteId: null, estado: 'historico', motor: 'CFN-77120', duenos: [ { nombre: 'Juan Carlos Pérez', dni: '30123456', desde: '2012-03-05', hasta: '2021-11-30' }, { nombre: 'Roberto Díaz', dni: '20456789', desde: '2021-11-30', hasta: '2024-06-14' } ] },
+      { id: 'veh_2', patente: 'LKM447', marca: 'Ford', modelo: 'Fiesta Kinetic', anio: 2011, color: 'Rojo', km: 214000, clienteId: null, estado: 'activo', motor: 'CFN-77120', duenos: [ { nombre: 'Juan Carlos Pérez', dni: '30123456', desde: '2012-03-05', hasta: '2021-11-30' }, { nombre: 'Roberto Díaz', dni: '20456789', desde: '2021-11-30', hasta: '2024-06-14' } ] },
       { id: 'veh_3', patente: 'AD998ZZ', marca: 'Volkswagen', modelo: 'Amarok Highline', anio: 2022, color: 'Negro', km: 46300, clienteId: 'cli_2', estado: 'activo', motor: 'DDX-551230', duenos: [] },
-      { id: 'veh_4', patente: 'JUV210', marca: 'Renault', modelo: 'Clio Authentique', anio: 2008, color: 'Azul', km: 268900, clienteId: null, estado: 'historico', motor: 'K4M-990211', duenos: [ { nombre: 'María González', dni: '27876543', desde: '2013-07-22', hasta: '2022-02-09' } ] },
+      { id: 'veh_4', patente: 'JUV210', marca: 'Renault', modelo: 'Clio Authentique', anio: 2008, color: 'Azul', km: 268900, clienteId: null, estado: 'activo', motor: 'K4M-990211', duenos: [ { nombre: 'María González', dni: '27876543', desde: '2013-07-22', hasta: '2022-02-09' } ] },
       { id: 'veh_5', patente: 'AE451QW', marca: 'Chevrolet', modelo: 'Onix LTZ', anio: 2023, color: 'Blanco', km: 18900, clienteId: 'cli_1', estado: 'activo', motor: 'LXT-330912', duenos: [] }
     ],
     servicios: [
@@ -160,7 +160,14 @@
       var raw = localStorage.getItem(LS_KEY);
       if (raw) {
         var d = JSON.parse(raw);
-        if (d && d.clientes && d.vehiculos && d.servicios) return d;
+        if (d && d.clientes && d.vehiculos && d.servicios) {
+          /* Datos viejos: un sin titular no puede quedar "histórico"
+             (desafiliar deja el auto activo). Se normaliza en memoria. */
+          d.vehiculos.forEach(function (v) {
+            if (!v.clienteId && v.estado === 'historico') v.estado = 'activo';
+          });
+          return d;
+        }
       }
     } catch (e) { /* modo incógnito / file:// restringido */ }
     return JSON.parse(JSON.stringify(seed));
@@ -885,39 +892,53 @@
   /* ==========================================================
      10. Vehículos (asociar a un cliente)
      ========================================================== */
-  /* Alta de vehículo. Dos contextos:
-     · Desde la ficha de un cliente (clienteId válido): se vincula a ese
-       titular, con el check "Propietario desconocido" como override.
-     · Desde el menú "Nuevo" (sin cliente): el propietario se elige en
-       la lista #v-cliente, cuya primer opción es "Propietario desconocido". */
+  /* Alta de vehículo con 3 modos de propietario (radios #v-modo):
+     · existente  → se elige el titular en #v-cliente (preseleccionado
+       si se llega desde la ficha de un cliente).
+     · nuevo      → se crea la ficha del titular inline y se vincula.
+     · desconocido→ nace "Propietario desconocido" (clienteId null). */
   function abrirVehiculoModal(clienteId) {
     var c = clientePorId(clienteId);
     estado.ctx = { clienteId: c ? c.id : null };
 
-    /* Lista de propietarios: opción libre + todos los clientes */
+    /* Lista de clientes existentes (modo "existente") */
     var sel = $('#v-cliente');
     var clientes = DB.clientes.slice().sort(function (a, b) { return a.nombre.localeCompare(b.nombre); });
-    sel.innerHTML = '<option value=""></option>' + clientes.map(function (x) {
+    sel.innerHTML = '<option value="">Elegí un cliente…</option>' + clientes.map(function (x) {
       return '<option value="' + esc(x.id) + '">' + esc(x.nombre + ' · DNI ' + x.dni) + '</option>';
     }).join('');
 
-    $('#vehForm').reset();
-    $('#v-sin-titular').checked = false;
+    $('#vehForm').reset();   /* los radios vuelven a "Cliente existente" */
     $('#v-anio').value = new Date().getFullYear();
+    if (c) sel.value = c.id;
 
-    if (c) {
-      sel.value = c.id;
-      $('#veh-sub').textContent = 'Se vinculará a ' + c.nombre + ' (DNI ' + esc(c.dni) + ').' +
-        ' Si no lo registrás a su nombre, marcalo abajo como "Propietario desconocido".';
-      $('#veh-holder').hidden = true;    /* el titular viene del contexto */
-      $('#v-sinrow').hidden = false;     /* override: desafiliar de nacimiento */
-    } else {
-      sel.value = '';
-      $('#veh-sub').textContent = 'Elegí el propietario del vehículo; si lo dejás vacío queda como "Propietario desconocido".';
-      $('#veh-holder').hidden = false;   /* el usuario elige en la lista */
-      $('#v-sinrow').hidden = true;
-    }
+    $('#veh-sub').textContent = c
+      ? 'Se vinculará a ' + c.nombre + ' (DNI ' + esc(c.dni) + ').' +
+        ' Podés cambiar el modo de propietario si necesitás otro destino.'
+      : 'Elegí el propietario: un cliente registrado, un alta nueva o dejalo sin titular.';
+    cambiarModoPropietario();
     abrirModal('#modal-vehiculo');
+  }
+
+  function modoPropietarioVeh() {
+    var r = document.querySelector('input[name="v-modo"]:checked');
+    return r ? r.value : 'existente';
+  }
+
+  /* Visibilidad por modo: sólo los campos activos son required, así el
+     reportValidity valida exactamente lo que el usuario está viendo. */
+  function cambiarModoPropietario() {
+    var modo = modoPropietarioVeh();
+    $('#veh-holder').hidden = modo !== 'existente';
+    $('#veh-nuevo-holder').hidden = modo !== 'nuevo';
+    $('#v-modo-hint').textContent = modo === 'nuevo'
+      ? 'Creamos la ficha del titular ahora y la vinculamos al vehículo.'
+      : (modo === 'desconocido'
+        ? 'El vehículo queda activo y sin titular: disponible para recibir órdenes de trabajo.'
+        : 'Asociá el vehículo a un titular ya registrado.');
+    $('#v-cliente').required = (modo === 'existente');
+    $('#v-cli-nombre').required = (modo === 'nuevo');
+    $('#v-cli-dni').required = (modo === 'nuevo');
   }
 
   /* Siempre nace 'activo': el cliente puede acumular varios activos y
@@ -929,13 +950,26 @@
     if (patente.length < 5) { toast('La patente parece incompleta', true); return; }
     if (vehiculoPorPatente(patente)) { toast('Ya existe un vehículo con esa patente', true); return; }
 
-    /* Propietario efectivo: en contexto de cliente el check "Propietario
-       desconocido" lo anula; en modo libre manda la lista (vacía = sin
-       titular). */
-    var clienteId;
-    if ($('#v-sin-titular').checked) clienteId = '';
-    else if (estado.ctx.clienteId) clienteId = estado.ctx.clienteId;
-    else clienteId = $('#v-cliente').value;
+    /* Propietario efectivo según el modo elegido */
+    var modo = modoPropietarioVeh();
+    var clienteId = null;
+
+    if (modo === 'existente') {
+      clienteId = $('#v-cliente').value || null;
+      if (!clienteId) { toast('Elegí el cliente propietario', true); return; }
+    } else if (modo === 'nuevo') {
+      /* Alta del titular inline: se reutiliza la ficha si el DNI ya existe */
+      var dni = norm($('#v-cli-dni').value);
+      var yaEsta = dni ? clientePorDni(dni) : null;
+      if (yaEsta) {
+        toast('Ya existe un cliente con ese DNI: se reutilizará su ficha');
+        clienteId = yaEsta.id;
+      } else {
+        var nc = { id: uid('cli'), nombre: $('#v-cli-nombre').value.trim(), dni: dni, telefono: $('#v-cli-tel').value.trim(), email: '', desde: hoy() };
+        DB.clientes.push(nc);
+        clienteId = nc.id;
+      }
+    } /* modo 'desconocido': clienteId queda null */
 
     var v = {
       id: uid('veh'),
@@ -946,7 +980,7 @@
       color: $('#v-color').value.trim(),
       km: Number($('#v-km').value) || null,
       motor: $('#v-motor').value.trim(),
-      clienteId: clienteId || null,
+      clienteId: clienteId,
       estado: 'activo',
       fechaAlta: hoy(),
       duenos: []
@@ -1861,7 +1895,7 @@ function iniciarCamara() {
     'guardar-transfer': function () { guardarTransfer(); },
     'guardar-cliente': function () { guardarCliente(); },
     'sin-titular': function () {
-      var vs = DB.vehiculos.filter(function (v) { return !v.clienteId; })
+      var vs = DB.vehiculos.filter(function (v) { return !v.clienteId && v.estado !== 'historico'; })
         .sort(function (a, b) { return a.patente.localeCompare(b.patente); });
       if (!vs.length) { toast('No hay vehículos sin titular'); return; }
       renderLista('vehiculos', vs, 'Vehículos sin titular (propietario desconocido)');
@@ -1891,7 +1925,11 @@ function iniciarCamara() {
     var el = ev.target.closest ? ev.target.closest('[data-act]') : null;
     if (!el) {
       if (ev.target.classList && ev.target.classList.contains('backdrop')) cerrarModal();
-      else cerrarMenuNuevo();     /* clic fuera del menú: se cierra */
+      else {
+        /* Clic suelto: sólo cierra el menú si fue fuera de su contenedor */
+        var menu = $('#nuevo-menu');
+        if (!(menu && menu.contains(ev.target))) cerrarMenuNuevo();
+      }
       return;
     }
     var fn = ACCIONES[el.dataset.act];
@@ -1946,6 +1984,11 @@ function iniciarCamara() {
 
   /* Switch "Propietario desconocido" vs. datos del nuevo titular */
   $('#tr-sin-titular').addEventListener('change', alternarDatosTitular);
+
+  /* Modo de propietario en el alta de vehículo: cambia los visibles */
+  $$('input[name="v-modo"]').forEach(function (r) {
+    r.addEventListener('change', cambiarModoPropietario);
+  });
 
   /* Autocompletar la ficha de un cliente conocido en la transferencia */
   $('#tr-dni').addEventListener('blur', function () {
