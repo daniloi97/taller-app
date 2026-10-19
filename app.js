@@ -8,10 +8,13 @@
      permite crear su propia Orden de Trabajo o ver su ficha. Un vehículo
      pasa a "Histórico" sólo por transferencia o desafiliación, y el dueño
      saliente queda registrado en vehiculo.duenos.
-   · Escáner con cámara: recorte ROI del visor, pre-procesado (grises +
-     Otsu) y Tesseract.js v5 cargado bajo demanda desde su CDN oficial
-     (https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js).
-     Sin internet la app sigue funcionando: queda la lectura manual.
+   · Escáner con cámara — ALPR con redes neuronales (ONNX Runtime Web,
+     WebGL/Wasm): ROI del visor → detector de chapa YOLOv9-tiny → lector
+     de 7 espacios entrenado con patentes argentinas (fast-plate-ocr) →
+     validación por formato → búsqueda automática. onnxruntime-web se
+     baja del CDN una sola vez; los pesos viven en models/ junto a este
+     archivo, así que el escaneo no necesita internet.
+     Sin modelos disponibles la app sigue funcionando: queda la lectura manual.
    · Tema claro / oscuro / automático: oculto en data-theme y persistido
      en taller_tema. El mini-script del <head> aplica el valor guardado
      antes del primer render para evitar parpadeo; este módulo lo mantiene
@@ -1093,152 +1096,279 @@ function iniciarCamara() {
   }
 
   /* ==========================================================
-     15. Motor OCR (Tesseract.js v5) desde su CDN
-     · La librería se descarga una sola vez; los clicks repetidos
-       reusan la misma descarga (cola de callbacks).
-     · El worker se crea UNA vez y queda PERSISTENTE: así setParameters()
-       aplica con garantía el whitelist de caracteres y el modo de
-       segmentación (PSM) en cada pasada.
-     · Timeout de 20 s: si la red no responde, no se cuelga el usuario.
+     15. Motor ALPR (ONNX Runtime Web + modelos fast-plate-ocr)
+     · onnxruntime-web (inferencia WebGL/Wasm) se descarga del CDN
+       una sola vez; los clicks repetidos reusan la misma cola.
+     · Los pesos viven en models/ junto a app.js: carga local e
+       instantánea cuando la app se sirve por http. Como respaldo
+       documentado quedan las URLs oficiales de GitHub.
+     · Detector: YOLOv9-tiny de chapa (fast-alpr). Lector: CNN de
+       7 espacios entrenada con patentes argentinas (fast-plate-ocr).
+     · Las sesiones se compilan UNA vez (WebGL con respaldo Wasm)
+       y quedan persistentes entre capturas.
      ========================================================== */
-  var TESSERACT_CDN = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
-  var tesseractEstado = 'no-iniciado';   /* no-iniciado | cargando | listo | error */
-  var tesseractCola = [];
-  var workerOCR = null;                  /* instancia persistente del worker */
+  var ORT_CDNS = [
+    'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.all.min.js',
+    'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.min.js',
+    'https://unpkg.com/onnxruntime-web@1.20.1/dist/ort.all.min.js'
+  ];
+  var ALPR = {
+    detIn: 640,                                   /* lado de entrada del detector */
+    lectorAn: 140, lectorAl: 70, slots: 7,        /* entrada del lector (config oficial) */
+    alfa: '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_',
+    umbralBox: 0.35,                              /* confianza mínima del detector */
+    arMin: 1.35, arMax: 9.0,                      /* aspecto ancho/alto plausible de una chapa */
+    corteBanda: 0.18,                             /* 2do intento: recorta la franja superior */
+    /* Orígenes de los pesos: primero el paquete local (models/),
+       después los release assets oficiales (requieren proxy CORS en
+       despliegues remotos: GitHub no envía cabeceras CORS ahí). */
+    detURLs: [
+      'models/yolo-v9-t-640.onnx',
+      'https://github.com/ankandrew/fast-alpr/releases/download/assets/yolo-v9-t-640.onnx'
+    ],
+    reURLs: [
+      'models/arg_cnn_ocr.onnx',
+      'https://github.com/ankandrew/fast-plate-ocr/releases/download/arg-plates/arg_cnn_ocr.onnx'
+    ]
+  };
+  var alpr = { estado: 'no-iniciado', cola: [], rt: null };   /* rt = { ort, det, red } */
+  var ortScriptIniciado = false;
+  var ortScriptCola = [];
 
-  function cargarTesseract(cb) {
-    if (tesseractEstado === 'listo' && workerOCR) { cb(null); return; }
-    if (tesseractEstado === 'cargando') { tesseractCola.push(cb); return; }
-
-    tesseractEstado = 'cargando';
-    tesseractCola.push(cb);
-    notaScan('Descargando el motor de lectura (OCR), se hace una sola vez…');
+  /* Descarga el runtime y lo deja en window.ort (cola + multi-CDN) */
+  function cargarOrtScript(cb) {
+    if (window.ort) { cb(null); return; }
+    ortScriptCola.push(cb);
+    if (ortScriptIniciado) return;
+    ortScriptIniciado = true;
+    var i = 0;
 
     function terminar(err) {
-      tesseractEstado = err ? 'error' : 'listo';
-      var pendientes = tesseractCola.slice();
-      tesseractCola = [];
+      var pendientes = ortScriptCola.slice();
+      ortScriptCola = [];
       pendientes.forEach(function (f) { f(err || null); });
     }
 
-    /* Paso 2: crear el worker persistente (con logger de progreso) */
-    function pasoWorker() {
-      if (!window.Tesseract || !window.Tesseract.createWorker) {
-        terminar(new Error('motor incompleto'));
-        toast('La librería OCR cargó incompleta. Reintentá.', true);
+    function intentar() {
+      if (window.ort) { terminar(null); return; }
+      if (i >= ORT_CDNS.length) {
+        terminar(new Error('sin CDN'));
+        toast('No se pudo cargar el motor neuronal (sin internet)', true);
+        notaScan('No se pudo descargar onnxruntime-web desde el CDN. Escribí la patente en la lectura manual o reintentá con conexión.');
         return;
       }
-      if (workerOCR) { terminar(null); return; }
-
-      window.Tesseract.createWorker('eng', 1, {
-        logger: function (m) {
-          if (!m) return;
-          var msg = $('#scan-msg');
-          if (!msg) return;
-          var p = Math.round((m.progress || 0) * 100);
-          if (m.status === 'loading tesseract core' || m.status === 'initializing tesseract') {
-            msg.textContent = 'Iniciando el motor OCR… ' + p + '%';
-          } else if (m.status === 'loading language traineddata') {
-            msg.textContent = 'Preparando el idioma de lectura… ' + p + '%';
-          } else if (m.status === 'recognizing text') {
-            msg.textContent = 'Leyendo la chapa… ' + p + '%';
-          }
-        }
-      }).then(function (w) {
-        workerOCR = w;
-        terminar(null);
-      }).catch(function (err) {
-        console.error('OCR worker:', err);
-        terminar(new Error('worker'));
-        toast('No se pudo iniciar el motor OCR', true);
-        notaScan('Falló el arranque del OCR. Reintentá o usá la lectura manual.');
-      });
-    }
-
-    /* Paso 1: descargar la librería si todavía no está en la página */
-    function pasoLibreria() {
       var script = document.createElement('script');
-      script.src = TESSERACT_CDN;
+      script.src = ORT_CDNS[i++];
       script.async = true;
 
       var temporizador = setTimeout(function () {
-        if (window.Tesseract) { pasoWorker(); return; }
-        terminar(new Error('timeout'));
-        toast('El motor OCR tardó demasiado en descargar', true);
-        notaScan('No se pudo descargar el OCR (red lenta o sin internet). Escribí la patente en la lectura manual o reintentá.');
-      }, 20000);
+        if (window.ort) return;
+        script.onload = script.onerror = null;
+        intentar();
+      }, 30000);
 
-      script.onload = function () { clearTimeout(temporizador); pasoWorker(); };
-      script.onerror = function () {
-        clearTimeout(temporizador);
-        terminar(new Error('no se pudo descargar'));
-        toast('Error al cargar el motor OCR. Verificá tu conexión a internet.', true);
-        notaScan('No se pudo descargar Tesseract.js desde el CDN. Escribí la patente en la lectura manual o reintentá.');
-      };
+      script.onload = function () { clearTimeout(temporizador); script.onload = script.onerror = null; intentar(); };
+      script.onerror = function () { clearTimeout(temporizador); script.onload = script.onerror = null; intentar(); };
 
       document.head.appendChild(script);
     }
+    intentar();
+  }
 
-    if (window.Tesseract) pasoWorker(); else pasoLibreria();
+  /* Descarga un modelo binario probando cada URL en orden, con progreso */
+  function descargarModelo(urls, cb, aviso) {
+    var i = 0;
+
+    function intentar() {
+      fetch(urls[i]).then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        var total = Number(r.headers.get('content-length')) || 0;
+        if (!r.body || !r.body.getReader) {
+          return r.arrayBuffer().then(function (b) { if (aviso) aviso(1); return b; });
+        }
+        var lector = r.body.getReader();
+        var partes = [], tomado = 0;
+
+        function paso() {
+          return lector.read().then(function (d) {
+            if (d.done) {
+              var todo = new Uint8Array(tomado), off = 0;
+              partes.forEach(function (p) { todo.set(p, off); off += p.length; });
+              return todo.buffer;
+            }
+            partes.push(d.value);
+            tomado += d.value.length;
+            if (total && aviso) aviso(tomado / total);
+            return paso();
+          });
+        }
+        return paso();
+      }).then(function (buf) {
+        cb(null, buf);
+      }).catch(function (e) {
+        i++;
+        if (i < urls.length) intentar(); else cb(e);
+      });
+    }
+    intentar();
+  }
+
+  /* Crea una sesión probando WebGL primero y Wasm como respaldo.
+     Se incluye una corrida de caldeo: los backends pueden fallar
+     EN LA CORRIDA aunque compilen el grafo (WebGL no soporta,
+     p. ej., el Resize nearest del YOLO): si el caldeo tira error,
+     se reintenta con el próximo EP para no quedar a media cadena. */
+  function crearSesion(ort, datos, prueba, cb) {
+    var eps = ['webgl', 'wasm'];
+    var i = 0;
+
+    function probar() {
+      if (i >= eps.length) { cb(new Error('sin backend disponible')); return; }
+      ort.InferenceSession.create(datos, { executionProviders: [eps[i++]] }).then(function (s) {
+        if (!prueba) { cb(null, s); return; }
+        var arr = new (prueba.tipo === 'float32' ? Float32Array : Uint8Array)(prueba.n);
+        var feeds = {};
+        feeds[s.inputNames[0]] = new ort.Tensor(prueba.tipo, arr, prueba.dims);
+        s.run(feeds).then(function () {
+          cb(null, s);
+        }).catch(function () { probar(); });
+      }).catch(function () { probar(); });
+    }
+    probar();
+  }
+
+  /* Orquestador: runtime + detector + lector (persistente, con cola) */
+  function cargarALPR(cb) {
+    if (alpr.estado === 'listo' && alpr.rt) { cb(null); return; }
+    if (alpr.estado === 'cargando') { alpr.cola.push(cb); return; }
+
+    alpr.estado = 'cargando';
+    alpr.cola.push(cb);
+    var msg = $('#scan-msg');
+
+    function terminar(err) {
+      alpr.estado = err ? 'error' : 'listo';
+      var pendientes = alpr.cola.slice();
+      alpr.cola = [];
+      pendientes.forEach(function (f) { f(err || null); });
+    }
+
+    function falloModelos(err) {
+      console.error('ALPR modelos:', err);
+      terminar(new Error('modelos'));
+      msg.textContent = 'No se pudieron cargar los modelos';
+      toast('No se pudieron cargar los modelos de lectura', true);
+      notaScan('Los pesos del detector y del lector viven en la carpeta models/ junto a app.js: serví la app con un servidor local (ej. “py -m http.server”) para que se carguen. Mientras tanto, usá la lectura manual.');
+    }
+
+    function pasoDetector(ort) {
+      descargarModelo(ALPR.detURLs, function (err, datos) {
+        if (err) { falloModelos(err); return; }
+        msg.textContent = 'Compilando el detector (red neuronal)…';
+        crearSesion(ort, datos,
+          { tipo: 'float32', dims: [1, 3, ALPR.detIn, ALPR.detIn], n: 3 * ALPR.detIn * ALPR.detIn },
+          function (err2, det) {
+            if (err2) { falloModelos(err2); return; }
+            pasoLector(ort, det);
+          });
+      }, function (p) {
+        if (p < 1) msg.textContent = 'Descargando detector de chapas… ' + Math.round(p * 100) + '%';
+      });
+    }
+
+    function pasoLector(ort, det) {
+      descargarModelo(ALPR.reURLs, function (err, datos) {
+        if (err) { falloModelos(err); return; }
+        msg.textContent = 'Compilando el lector de caracteres…';
+        crearSesion(ort, datos,
+          { tipo: 'uint8', dims: [1, ALPR.lectorAl, ALPR.lectorAn, 1], n: ALPR.lectorAl * ALPR.lectorAn },
+          function (err2, red) {
+            if (err2) { falloModelos(err2); return; }
+            alpr.rt = { ort: ort, det: det, red: red };
+            terminar(null);
+          });
+      }, function (p) {
+        if (p < 1) msg.textContent = 'Descargando lector de patentes… ' + Math.round(p * 100) + '%';
+      });
+    }
+
+    msg.textContent = 'Iniciando el motor neuronal…';
+    cargarOrtScript(function (err) {
+      if (err) { terminar(err); return; }
+      pasoDetector(window.ort);
+    });
   }
 
   /* ==========================================================
-     16. Pre-procesamiento de la imagen (canvas oculto)
-     1) escala si es chica (la tipografía de la chapa es fina),
-     2) escala de grises por luminancia (0.299/0.587/0.114),
-     3) binarización con el umbral de Otsu (texto negro / fondo blanco).
+     16. Tensores de entrada (canvas → datos numéricos)
+     · Detector: letterbox a 640×640 (gris replicado en RGB, /255,
+       float32 CHW). Devuelve la escala y el offset para mapear
+       las cajas de vuelta a píxeles de la imagen original.
+     · Lector: recorte estirado a 140×70 en uint8 gris NHWC, tal
+       como espera arg_cnn_ocr (la normalización vive adentro del
+       modelo). El binarizado con Otsu se eliminó: las redes
+       convolucionales rinden mejor con la luz natural.
      ========================================================== */
-  function prepararCanvasOCR(src) {
-    var w = src.width, h = src.height;
-    var escala = (w && w < 1000) ? Math.min(2, 1000 / w) : 1;
+  function prepararTensorDetector(ort, src) {
+    var S = ALPR.detIn;
     var cv = document.createElement('canvas');
-    cv.width = Math.round((w || 640) * escala);
-    cv.height = Math.round((h || 480) * escala);
+    cv.width = S; cv.height = S;
+    var ctx = cv.getContext('2d');
+    ctx.fillStyle = 'rgb(114,114,114)';
+    ctx.fillRect(0, 0, S, S);
+
+    var escala = Math.min(S / src.width, S / src.height);
+    var dibW = src.width * escala, dibH = src.height * escala;
+    var offX = (S - dibW) / 2, offY = (S - dibH) / 2;
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(src, offX, offY, dibW, dibH);
+
+    var im = ctx.getImageData(0, 0, S, S);
+    var px = im.data;
+    var N = S * S;
+    var arr = new Float32Array(3 * N);
+    for (var i = 0; i < N; i++) {
+      var v = (px[i * 4] * 0.299 + px[i * 4 + 1] * 0.587 + px[i * 4 + 2] * 0.114) / 255;
+      arr[i] = v; arr[N + i] = v; arr[2 * N + i] = v;
+    }
+    return {
+      tensor: new ort.Tensor('float32', arr, [1, 3, S, S]),
+      escala: escala, offX: offX, offY: offY
+    };
+  }
+
+  function prepararTensorLector(ort, srcCrop) {
+    var an = ALPR.lectorAn, al = ALPR.lectorAl;
+    var cv = document.createElement('canvas');
+    cv.width = an; cv.height = al;
     var ctx = cv.getContext('2d');
     ctx.imageSmoothingEnabled = true;
-    ctx.drawImage(src, 0, 0, cv.width, cv.height);
+    ctx.drawImage(srcCrop, 0, 0, an, al);
 
-    try {
-      var img = ctx.getImageData(0, 0, cv.width, cv.height);
-      var px = img.data;
-      var hist = new Array(256);
-      for (var i = 0; i < 256; i++) hist[i] = 0;
-
-      for (var p = 0; p < px.length; p += 4) {
-        var g = (px[p] * 0.299 + px[p + 1] * 0.587 + px[p + 2] * 0.114) | 0;
-        px[p] = px[p + 1] = px[p + 2] = g;
-        hist[g]++;
-      }
-
-      /* Otsu: separa el gris en dos clases maximizando la varianza
-         entre clases (caracteres vs fondo metálico). */
-      var total = px.length / 4;
-      var sumaT = 0;
-      for (var q = 0; q < 256; q++) sumaT += q * hist[q];
-      var sumaB = 0, wB = 0, mejor = -1, umbral = 127;
-      for (var t2 = 0; t2 < 256; t2++) {
-        wB += hist[t2];
-        if (!wB) continue;
-        var wF = total - wB;
-        if (!wF) break;
-        sumaB += t2 * hist[t2];
-        var mB = sumaB / wB, mF = (sumaT - sumaB) / wF;
-        var entre = wB * wF * (mB - mF) * (mB - mF);
-        if (entre > mejor) { mejor = entre; umbral = t2; }
-      }
-      /* Imagen uniforme (cámara tapada): Otsu no aporta, queda la gris. */
-      if (mejor > 0) {
-        for (var r = 0; r < px.length; r += 4) {
-          var v = px[r] > umbral ? 255 : 0;
-          px[r] = px[r + 1] = px[r + 2] = v;
-        }
-        ctx.putImageData(img, 0, 0);
-      }
-    } catch (e) {
-      /* getImageData puede fallar con un frame viciado; se sigue con
-         la imagen tal cual: mejor intentar que cancelar la lectura. */
+    var im = ctx.getImageData(0, 0, an, al);
+    var px = im.data;
+    var u8 = new Uint8Array(an * al);
+    for (var i = 0; i < u8.length; i++) {
+      u8[i] = (px[i * 4] * 0.299 + px[i * 4 + 1] * 0.587 + px[i * 4 + 2] * 0.114) | 0;
     }
-    return cv;
+    return new ort.Tensor('uint8', u8, [1, al, an, 1]);
+  }
+
+  /* Salida del lector [1, 259] = 7 espacios × 37 clases: argmax por
+     espacio y descarte del relleno '_'. */
+  function decodificarSalidaLector(t) {
+    if (!t || !t.data || !t.dims || t.dims.length !== 2) return '';
+    var K = ALPR.alfa.length;
+    var texto = '';
+    for (var s = 0; s < ALPR.slots; s++) {
+      var bi = 0, bv = -Infinity;
+      for (var c = 0; c < K && (s * K + c) < t.data.length; c++) {
+        var v = t.data[s * K + c];
+        if (v > bv) { bv = v; bi = c; }
+      }
+      texto += ALPR.alfa.charAt(bi);
+    }
+    return texto.replace(/_/g, '');
   }
 
   /* ==========================================================
@@ -1275,17 +1405,118 @@ function iniciarCamara() {
 
     sx = Math.max(0, Math.min(vw, sx)); sy = Math.max(0, Math.min(vh, sy));
     ex = Math.max(0, Math.min(vw, ex)); ey = Math.max(0, Math.min(vh, ey));
-    if (ex - sx < 24 || ey - sy < 16) return null;   /* encuadre degenerado */
+    if (ex - sx < 24 || ey - sy < 16) return null;
 
     return { sx: sx, sy: sy, sw: ex - sx, sh: ey - sy };
   }
 
   /* ==========================================================
-     18. Capturar y leer: ROI → pre-procesado → OCR en 2 pasadas
-       intento 1 → PSM 7 (línea única: la chapa entera)
-       intento 2 → PSM 6 (bloque uniforme: encuadre amplio)
-     con whitelist A-Z0-9 y validación por extraerPatenteOTexto().
+     18. Capturar y leer: ROI → detector → recorte alineado → lector
+       · El YOLOv9-tiny devuelve N candidatas; se quedan las que
+         superan el umbral con aspecto de patente y se aplica NMS
+         (IoU 0.5) para descartar duplicados del mismo box.
+       · La mejor caja (convertida a píxeles del ROI) se recorta con
+         margen horizontal. Si el texto leído no da una patente con
+         formato, se reintenta una vez recortando la franja superior
+         (por si el visor incluyó la banda celeste Mercosur).
+       · Sin detección: se lee el centro del ROI, apostando por el
+         encuadre manual del usuario (como en el flujo anterior).
+       · El texto pasa por extraerPatenteOTexto(): sin formato
+         válido se guía al usuario hacia la lectura manual.
      ========================================================== */
+  function iouBox(a, b) {
+    var aL = a.cx - a.w / 2, aT = a.cy - a.h / 2, aR = a.cx + a.w / 2, aB = a.cy + a.h / 2;
+    var bL = b.cx - b.w / 2, bT = b.cy - b.h / 2, bR = b.cx + b.w / 2, bB = b.cy + b.h / 2;
+    var x = Math.min(aR, bR) - Math.max(aL, bL);
+    var y = Math.min(aB, bB) - Math.max(aT, bT);
+    if (x <= 0 || y <= 0) return 0;
+    var inter = x * y;
+    return inter / (a.w * a.h + b.w * b.h - inter);
+  }
+
+  /* Corre el detector sobre la imagen ROI y devuelve la mejor caja
+     en píxeles de esa imagen: { sx, sy, sw, sh } (o null). */
+  function detectarChapa(rt, src, cb) {
+    var pre = prepararTensorDetector(rt.ort, src);
+    var feeds = {};
+    feeds[rt.det.inputNames[0]] = pre.tensor;
+
+    rt.det.run(feeds).then(function (sal) {
+      var t = sal[rt.det.outputNames[0]];
+      if (!t || !t.data || !t.dims || t.dims.length !== 3) { cb(null, null); return; }
+
+      /* [1,5,N] es el layout verificado de yolo-v9-t-640 (formato
+         Ultralytics); también se cubre el invertido [1,N,5]. */
+      var horizontal = t.dims[1] === 5;
+      var C = horizontal ? 5 : t.dims[1];
+      var N = horizontal ? t.dims[2] : t.dims[1];
+      if (C !== 5) { cb(null, null); return; }
+
+      var cands = [];
+      for (var j = 0; j < N; j++) {
+        var s = horizontal ? t.data[4 * N + j] : t.data[j * 5 + 4];
+        if (s < ALPR.umbralBox) continue;
+        var cx = horizontal ? t.data[0 * N + j] : t.data[j * 5];
+        var cy = horizontal ? t.data[1 * N + j] : t.data[j * 5 + 1];
+        var w = horizontal ? t.data[2 * N + j] : t.data[j * 5 + 2];
+        var h = horizontal ? t.data[3 * N + j] : t.data[j * 5 + 3];
+        if (h < 8 || w < 14) continue;
+        var ar = w / h;
+        if (ar < ALPR.arMin || ar > ALPR.arMax) continue;
+        cands.push({ cx: cx, cy: cy, w: w, h: h, s: s });
+      }
+      cands.sort(function (a, b) { return b.s - a.s; });
+
+      /* NMS greedy: descarta solapes > 50% entre aceptadas */
+      var elegidas = [];
+      for (var k = 0; k < cands.length && elegidas.length < 4; k++) {
+        var c2 = cands[k], ok = true;
+        for (var m = 0; m < elegidas.length; m++) {
+          if (iouBox(c2, elegidas[m]) > 0.5) { ok = false; break; }
+        }
+        if (ok) elegidas.push(c2);
+      }
+
+      if (!elegidas.length) { cb(null, null); return; }
+
+      /* De píxeles del letterbox 640×640 a píxeles de la imagen ROI */
+      var bb = elegidas[0];
+      var sx = (bb.cx - bb.w / 2 - pre.offX) / pre.escala;
+      var sy = (bb.cy - bb.h / 2 - pre.offY) / pre.escala;
+      var sw = bb.w / pre.escala;
+      var sh = bb.h / pre.escala;
+      sx = Math.max(0, sx); sy = Math.max(0, sy);
+      sw = Math.min(src.width - sx, sw); sh = Math.min(src.height - sy, sh);
+      if (sw < 14 || sh < 8) { cb(null, null); return; }
+
+      cb(null, { sx: sx, sy: sy, sw: sw, sh: sh, s: bb.s });
+    }).catch(function (e) { cb(e, null); });
+  }
+
+  /* Recorta la caja con margen horizontal; corteTop descarta la
+     franja superior (banda celeste Mercosur) del recorte. */
+  function recortarCaja(src, caja, corteTop) {
+    var pad = 0.05;
+    var sx = Math.max(0, caja.sx - caja.sw * pad);
+    var sy = Math.max(0, caja.sy + caja.sh * corteTop - caja.sh * pad);
+    var sw = Math.min(src.width - sx, caja.sw * (1 + 2 * pad));
+    var sh = Math.min(src.height - sy, caja.sh * (1 - corteTop + pad));
+    if (sw < 10 || sh < 6) return null;
+
+    var cv = document.createElement('canvas');
+    cv.width = Math.round(sw); cv.height = Math.round(sh);
+    cv.getContext('2d').drawImage(src, sx, sy, sw, sh, 0, 0, cv.width, cv.height);
+    return cv;
+  }
+
+  /* Sin detección: caja central del ROI (~73% del área) */
+  function cajaCentrada(src) {
+    return {
+      sx: src.width * 0.135, sy: src.height * 0.240,
+      sw: src.width * 0.730, sh: src.height * 0.520
+    };
+  }
+
   function capturarYLeer() {
     var video = $('#scan-video');
     var msg = $('#scan-msg');
@@ -1313,62 +1544,69 @@ function iniciarCamara() {
       0, 0, canvas.width, canvas.height
     );
 
-    msg.textContent = 'Preparando el motor de lectura (OCR)…';
+    msg.textContent = 'Preparando el motor neuronal…';
 
-    cargarTesseract(function (err) {
+    cargarALPR(function (err) {
       if (turno !== ocrSeq) return;
       if (err) {
-        msg.textContent = 'No se pudo cargar el OCR';
+        msg.textContent = 'No se pudo cargar el motor';
         $('#scan-manual').focus();
         return;
       }
+      var rt = alpr.rt;
 
-      /* Pre-procesamiento: grises + Otsu + escalado */
-      var cvListo = prepararCanvasOCR(canvas);
+      function leerCaja(caja, corteTop) {
+        var crop = recortarCaja(canvas, caja, corteTop);
+        if (!crop) { fallaLectura(); return; }
 
-      function leer(intento) {
-        var psm = (intento === 1)
-          ? (window.Tesseract.PSM ? window.Tesseract.PSM.SINGLE_LINE : '7')
-          : (window.Tesseract.PSM ? window.Tesseract.PSM.SINGLE_BLOCK : '6');
-        if (intento === 2) msg.textContent = 'Sin chapa clara: segundo intento con encuadre amplio…';
-
-        /* Whitelist: sólo mayúsculas y dígitos (descarta minúsculas,
-           tildes y símbolos) */
-        workerOCR.setParameters({
-          tessedit_pageseg_mode: psm,
-          tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
-        }).then(function () {
-          return workerOCR.recognize(cvListo);
-        }).then(function (res) {
+        var tIn = prepararTensorLector(rt.ort, crop);
+        var feedsL = {};
+        feedsL[rt.red.inputNames[0]] = tIn;
+        rt.red.run(feedsL).then(function (sal) {
           if (turno !== ocrSeq) return;
-          var textoBruto = res && res.data ? (res.data.text || '') : '';
-          var dato = extraerPatenteOTexto(textoBruto);
+          var tt = sal[rt.red.outputNames[0]];
+          var bruto = decodificarSalidaLector(tt);
+          var dato = extraerPatenteOTexto(bruto);
 
           /* Coincidencia limpia: cerrar, volcar en #q y buscar */
           if (dato) { usarLectura(dato); return; }
 
-          /* Sin patrón: segunda pasada con encuadre amplio */
-          if (intento === 1) { leer(2); return; }
+          /* Sin patrón: segundo recorte sin la banda superior */
+          if (corteTop < ALPR.corteBanda) { leerCaja(caja, ALPR.corteBanda); return; }
 
-          /* Lectura poco clara: guiar sin cerrar el modal */
-          msg.textContent = 'Lectura poco clara';
-          notaScan('No se detectó una patente legible. Acercá el celular a la chapa, encuadrá el recuadro sin reflejos y pulsá "Capturar y leer" de nuevo; o usá la lectura manual.');
-          toast('No se pudo leer la chapa. Acercate más o usá la lectura manual.', true);
+          fallaLectura();
         }).catch(function (e) {
           if (turno !== ocrSeq) return;
-          if (intento === 1) { leer(2); return; }
-          console.error('OCR:', e);
-          msg.textContent = 'Error durante la lectura';
-          notaScan('El procesamiento de imagen falló. Probá de nuevo o ingresá la patente manualmente.');
-          toast('Error durante la lectura de la imagen.', true);
+          console.error('ALPR lector:', e);
+          fallaLectura();
         });
       }
 
-      leer(1);
+      function fallaLectura() {
+        msg.textContent = 'Lectura poco clara';
+        notaScan('No se detectó una patente legible. Acercá el celular a la chapa, encuadrá el recuadro sin reflejos y pulsá "Capturar y leer" de nuevo; o usá la lectura manual.');
+        toast('No se pudo leer la chapa. Acercate más o usá la lectura manual.', true);
+      }
+
+      detectarChapa(rt, canvas, function (err2, cajaDet) {
+        if (turno !== ocrSeq) return;
+        if (err2) {
+          console.error('ALPR detector:', err2);
+          msg.textContent = 'Error al localizar la chapa';
+          notaScan('La detección falló. Probá de nuevo o ingresá la patente manualmente.');
+          toast('Error al localizar la chapa en la imagen.', true);
+          $('#scan-manual').focus();
+          return;
+        }
+
+        var caja = cajaDet || cajaCentrada(canvas);
+        msg.textContent = cajaDet ? 'Leyendo la patente…' : 'Sin chapa clara al frente: probando el centro del visor…';
+        leerCaja(caja, 0);
+      });
     });
   }
 
-  /* Lectura usada (OCR o manual): cierra, vuelca en #q y busca */
+  /* Lectura usada (detector o manual): cierra, vuelca en #q y busca */
   function usarLectura(val) {
     var v = String(val || '').trim();
     cerrarModal();
