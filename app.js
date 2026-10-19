@@ -252,6 +252,7 @@
     swap: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4 3 8l4 4"/><path d="M3 8h13a4 4 0 0 1 0 8h-2"/></svg>',
     plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
     check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>',
+    lapiz: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>',
     trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-14"/></svg>',
     alert: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>',
     info: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>',
@@ -296,7 +297,7 @@
         '<h3>Sin resultados para “' + esc(q) + '”</h3>' +
         '<p>No encontramos ningún cliente ni vehículo con ese dato.</p>' +
         '<div class="row" style="justify-content:center;flex-wrap:wrap;margin-top:16px">' +
-          '<button class="btn primary" data-act="nuevo-registro">' + ICON.plus + ' Registrar cliente</button>' +
+          '<button class="btn primary" data-act="menu-nuevo-cliente">' + ICON.plus + ' Registrar cliente</button>' +
           '<button class="btn" data-act="scan">' + ICON.search + ' Escanear otra vez</button>' +
         '</div>' +
       '</div></section>';
@@ -419,6 +420,10 @@
         '</div>' +
       '</section>';
 
+    if (v.estado !== 'historico') {
+      html += '<div class="section"><button class="btn primary full" data-act="nueva-ot" data-vehiculo="' + esc(v.id) + '">' +
+        ICON.wrench + ' Nueva Orden de Trabajo para ' + esc(v.patente) + '</button></div>';
+    }
     if (cli) {
       html += '<div class="section"><button class="btn full" data-act="ver-cliente" data-cliente="' + esc(cli.id) + '">' +
         ICON.user + ' Ver ficha del cliente: ' + esc(cli.nombre) + '</button></div>';
@@ -466,6 +471,7 @@
           '</div>' +
           (s.obs ? '<p class="small muted mt10">' + esc(s.obs) + '</p>' : '') +
           '<div class="tl-foot">' +
+            '<button type="button" class="tl-edit" data-act="editar-ot" data-id="' + esc(s.id) + '" title="Editar esta orden de trabajo" aria-label="Editar orden de trabajo">' + ICON.lapiz + ' Editar</button>' +
             '<span class="xsmall muted">Mano de obra ' + money(s.manoObra) + (rep ? ' · Repuestos ' + money(rep) : '') + '</span>' +
             '<span class="tl-cost">' + money(costo) + '</span>' +
           '</div>' +
@@ -704,48 +710,109 @@
   /* ==========================================================
      9. Orden de Trabajo (modal)
      ========================================================== */
-  /* Si llega vehiculoId (tarjeta del cliente), el select preselecciona
-     ese auto; si llega sólo clienteId, sus autos activos van al tope. */
-  function abrirOT(vehiculoId, clienteId) {
-    estado.ctx = { clienteId: clienteId || null };
+  /* Select de vehículos para una orden: TODOS los activos (con o sin
+     titular) ordenados por patente; los del cliente en contexto van al
+     tope. Los sin titular se marcan "(Sin titular)". */
+  function llenarVehiculosOT(clienteId, forzarId) {
     var sel = $('#ot-vehiculo');
-    var lista = DB.vehiculos.slice().sort(function (a, b) { return a.patente.localeCompare(b.patente); });
+    sel.disabled = false;
+    var lista = DB.vehiculos.filter(function (v) { return v.estado !== 'historico'; })
+      .sort(function (a, b) { return a.patente.localeCompare(b.patente); });
     if (clienteId) {
       var delCliente = lista.filter(function (v) { return v.clienteId === clienteId; });
       if (delCliente.length) lista = delCliente.concat(lista.filter(function (v) { return v.clienteId !== clienteId; }));
     }
+    /* En edición se fuerza el vehículo de la orden aunque sea histórico */
+    if (forzarId) {
+      var forzado = vehiculoPorId(forzarId);
+      if (forzado && lista.indexOf(forzado) < 0) lista = [forzado].concat(lista);
+    }
     sel.innerHTML = '<option value="">Seleccioná un vehículo…</option>' + lista.map(function (v) {
-      var marcador = (clienteId && v.clienteId === clienteId && v.estado !== 'historico') ? ' · activo' : '';
-      return '<option value="' + esc(v.id) + '">' + esc(v.patente + ' — ' + v.marca + ' ' + v.modelo + ' (' + (v.anio || '—') + ')' + marcador) + '</option>';
+      var etiqueta = v.patente + ' — ' + v.marca + ' ' + v.modelo + ' (' + (v.anio || '—') + ')';
+      if (clienteId && v.clienteId === clienteId) etiqueta += ' · activo';
+      if (!v.clienteId) etiqueta += ' (Sin titular)';
+      return '<option value="' + esc(v.id) + '">' + esc(etiqueta) + '</option>';
     }).join('');
-    if (vehiculoId) sel.value = vehiculoId;
+  }
+
+  /* Grilla de tareas sugeridas; las guardadas que ya no están en la
+     lista se agregan al final y quedan marcadas. */
+  function renderTareasOT(seleccionadas) {
+    var sel = (seleccionadas || []).slice();
+    var lista = TAREAS_SUGERIDAS.slice();
+    sel.forEach(function (t) { if (lista.indexOf(t) < 0) lista.push(t); });
+    $('#ot-tareas').innerHTML = lista.map(function (t) {
+      return '<label class="check"><input type="checkbox" value="' + esc(t) + '"' +
+        (sel.indexOf(t) >= 0 ? ' checked' : '') + '>' + esc(t) + '</label>';
+    }).join('');
+  }
+
+  function filaRepuesto(nombre, cantidad, precio) {
+    return '<div class="rep-row mt6">' +
+      '<input class="inp" placeholder="Repuesto" data-rep="nombre" value="' + esc(nombre || '') + '">' +
+      '<input class="inp" type="number" min="1" step="1" value="' + (Number(cantidad) || 1) + '" data-rep="cantidad" inputmode="numeric" title="Cantidad">' +
+      '<input class="inp" type="number" min="0" step="100" value="' + (Number(precio) || 0) + '" data-rep="precio" inputmode="numeric" title="Precio unitario">' +
+      '<button type="button" class="icon-del" data-act="del-repuesto" title="Quitar">' + ICON.trash + '</button>' +
+    '</div>';
+  }
+
+  /* Alta de una orden: preselección por tarjeta, o vehículos del
+     cliente en contexto al tope del listado. */
+  function abrirOT(vehiculoId, clienteId) {
+    estado.ctx = { clienteId: clienteId || null, editarId: null };
+    llenarVehiculosOT(clienteId, vehiculoId);
+    if (vehiculoId) $('#ot-vehiculo').value = vehiculoId;
 
     var v = vehiculoId ? vehiculoPorId(vehiculoId) : null;
+    $('#ot-title').textContent = 'Nueva Orden de Trabajo';
     $('#ot-sub').textContent = v ? 'Vehículo: ' + v.patente + ' · ' + v.marca + ' ' + v.modelo : 'Cargá los datos del servicio realizado';
     $('#ot-fecha').value = hoy();
     $('#ot-km').value = v && v.km ? v.km : '';
     $('#ot-mano').value = 0;
     $('#ot-obs').value = '';
 
-    $('#ot-tareas').innerHTML = TAREAS_SUGERIDAS.map(function (t) {
-      return '<label class="check"><input type="checkbox" value="' + esc(t) + '">' + esc(t) + '</label>';
-    }).join('');
-
+    renderTareasOT(null);
     $('#ot-repuestos').innerHTML = '';
     agregarRepuesto();
     calcularTotal();
     abrirModal('#modal-ot');
   }
 
+  /* Edición de una orden del historial: mismo modal, formulario
+     precargado (fecha, km, tareas, repuestos, mano de obra, obs).
+     El vehículo no se cambia — la orden ya le pertenece — para no
+     desordenar la historia clínica de otro auto. */
+  function abrirEdicionOT(id) {
+    var s = DB.servicios.filter(function (x) { return x.id === id; })[0];
+    if (!s) { toast('La orden ya no existe', true); return; }
+    var v = vehiculoPorId(s.vehiculoId);
+
+    estado.ctx = { clienteId: v ? v.clienteId : null, editarId: s.id };
+    llenarVehiculosOT(null, s.vehiculoId);
+    var sel = $('#ot-vehiculo');
+    sel.value = s.vehiculoId;
+    sel.disabled = true;
+
+    $('#ot-title').textContent = 'Editar Orden de Trabajo';
+    $('#ot-sub').textContent = 'Editando la orden del ' + fecha(s.fecha) +
+      (v ? ' · ' + v.patente + ' — ' + v.marca + ' ' + v.modelo : '');
+    $('#ot-fecha').value = (s.fecha && /^\d{4}-\d{2}-\d{2}$/.test(s.fecha)) ? s.fecha : hoy();
+    $('#ot-km').value = s.km || '';
+    $('#ot-mano').value = Number(s.manoObra) || 0;
+    $('#ot-obs').value = s.obs || '';
+
+    renderTareasOT(s.tareas);
+    var reps = (s.repuestos || []).filter(function (r) { return r && r.nombre; });
+    $('#ot-repuestos').innerHTML = reps.map(function (r) {
+      return filaRepuesto(r.nombre, r.cantidad, r.precio);
+    }).join('');
+    if (!reps.length) agregarRepuesto();
+    calcularTotal();
+    abrirModal('#modal-ot');
+  }
+
   function agregarRepuesto() {
-    var row = document.createElement('div');
-    row.className = 'rep-row mt6';
-    row.innerHTML =
-      '<input class="inp" placeholder="Repuesto" data-rep="nombre">' +
-      '<input class="inp" type="number" min="1" step="1" value="1" data-rep="cantidad" inputmode="numeric" title="Cantidad">' +
-      '<input class="inp" type="number" min="0" step="100" value="0" data-rep="precio" inputmode="numeric" title="Precio unitario">' +
-      '<button type="button" class="icon-del" data-act="del-repuesto" title="Quitar">' + ICON.trash + '</button>';
-    $('#ot-repuestos').appendChild(row);
+    $('#ot-repuestos').insertAdjacentHTML('beforeend', filaRepuesto('', 1, 0));
   }
 
   function leerRepuestos() {
@@ -766,27 +833,51 @@
   }
 
   function guardarOT() {
-    var vid = $('#ot-vehiculo').value;
+    var editId = estado.ctx.editarId || null;
+    var sActual = editId ? DB.servicios.filter(function (x) { return x.id === editId; })[0] : null;
+    if (editId && !sActual) { cerrarModal(); toast('La orden ya no existe', true); return; }
+
+    var vid = sActual ? sActual.vehiculoId : $('#ot-vehiculo').value;
     if (!vid) { toast('Seleccioná un vehículo', true); return; }
 
-    DB.servicios.push({
-      id: uid('srv'),
-      vehiculoId: vid,
+    var datos = {
       fecha: $('#ot-fecha').value || hoy(),
       km: Number($('#ot-km').value) || null,
       tareas: $$('#ot-tareas input:checked').map(function (i) { return i.value; }),
       repuestos: leerRepuestos(),
       manoObra: Number($('#ot-mano').value) || 0,
       obs: $('#ot-obs').value.trim()
-    });
+    };
 
-    /* El kilometraje del vehículo queda actualizado con esta OT */
+    if (sActual) {
+      /* Edición: se conserva id y vehículo de la orden */
+      sActual.fecha = datos.fecha; sActual.km = datos.km; sActual.tareas = datos.tareas;
+      sActual.repuestos = datos.repuestos; sActual.manoObra = datos.manoObra; sActual.obs = datos.obs;
+    } else {
+      DB.servicios.push({
+        id: uid('srv'),
+        vehiculoId: vid,
+        fecha: datos.fecha,
+        km: datos.km,
+        tareas: datos.tareas,
+        repuestos: datos.repuestos,
+        manoObra: datos.manoObra,
+        obs: datos.obs
+      });
+    }
+
+    /* El odómetro del vehículo NO retrocede: kilometraje ingresado menor
+       o igual (p. ej. al editar una orden vieja) no afecta la ficha. */
     var v = vehiculoPorId(vid);
-    if (v && Number($('#ot-km').value)) v.km = Number($('#ot-km').value);
+    var kmIngresado = Number($('#ot-km').value) || 0;
+    if (v && kmIngresado) v.km = Math.max(v.km || 0, kmIngresado);
 
     var ok = guardar();
     cerrarModal();
-    toast(ok ? 'Orden de trabajo guardada' : 'Orden guardada (sin persistencia local)');
+    estado.ctx = {};
+    toast(ok
+      ? (sActual ? 'Orden actualizada' : 'Orden de trabajo guardada')
+      : (sActual ? 'Orden actualizada (sin persistencia local)' : 'Orden guardada (sin persistencia local)'));
     if (estado.vista === 'vehiculo' && estado.vehiculoId === vid) estado.tab = 'historial';
     refrescar();
   }
@@ -794,23 +885,57 @@
   /* ==========================================================
      10. Vehículos (asociar a un cliente)
      ========================================================== */
+  /* Alta de vehículo. Dos contextos:
+     · Desde la ficha de un cliente (clienteId válido): se vincula a ese
+       titular, con el check "Propietario desconocido" como override.
+     · Desde el menú "Nuevo" (sin cliente): el propietario se elige en
+       la lista #v-cliente, cuya primer opción es "Propietario desconocido". */
   function abrirVehiculoModal(clienteId) {
     var c = clientePorId(clienteId);
-    if (!c) return;
-    estado.ctx = { clienteId: clienteId };
-    $('#veh-sub').textContent = 'Se vinculará a ' + c.nombre + ' (DNI ' + esc(c.dni) + ')';
+    estado.ctx = { clienteId: c ? c.id : null };
+
+    /* Lista de propietarios: opción libre + todos los clientes */
+    var sel = $('#v-cliente');
+    var clientes = DB.clientes.slice().sort(function (a, b) { return a.nombre.localeCompare(b.nombre); });
+    sel.innerHTML = '<option value=""></option>' + clientes.map(function (x) {
+      return '<option value="' + esc(x.id) + '">' + esc(x.nombre + ' · DNI ' + x.dni) + '</option>';
+    }).join('');
+
     $('#vehForm').reset();
+    $('#v-sin-titular').checked = false;
     $('#v-anio').value = new Date().getFullYear();
+
+    if (c) {
+      sel.value = c.id;
+      $('#veh-sub').textContent = 'Se vinculará a ' + c.nombre + ' (DNI ' + esc(c.dni) + ').' +
+        ' Si no lo registrás a su nombre, marcalo abajo como "Propietario desconocido".';
+      $('#veh-holder').hidden = true;    /* el titular viene del contexto */
+      $('#v-sinrow').hidden = false;     /* override: desafiliar de nacimiento */
+    } else {
+      sel.value = '';
+      $('#veh-sub').textContent = 'Elegí el propietario del vehículo; si lo dejás vacío queda como "Propietario desconocido".';
+      $('#veh-holder').hidden = false;   /* el usuario elige en la lista */
+      $('#v-sinrow').hidden = true;
+    }
     abrirModal('#modal-vehiculo');
   }
 
-  /* Siempre nace 'activo': el cliente puede acumular varios activos. */
+  /* Siempre nace 'activo': el cliente puede acumular varios activos y
+     el sin titular queda disponible para órdenes de trabajo enseguida. */
   function guardarVehiculo() {
     var form = $('#vehForm');
     if (!form.reportValidity()) return;
     var patente = norm($('#v-patente').value);
     if (patente.length < 5) { toast('La patente parece incompleta', true); return; }
     if (vehiculoPorPatente(patente)) { toast('Ya existe un vehículo con esa patente', true); return; }
+
+    /* Propietario efectivo: en contexto de cliente el check "Propietario
+       desconocido" lo anula; en modo libre manda la lista (vacía = sin
+       titular). */
+    var clienteId;
+    if ($('#v-sin-titular').checked) clienteId = '';
+    else if (estado.ctx.clienteId) clienteId = estado.ctx.clienteId;
+    else clienteId = $('#v-cliente').value;
 
     var v = {
       id: uid('veh'),
@@ -821,7 +946,7 @@
       color: $('#v-color').value.trim(),
       km: Number($('#v-km').value) || null,
       motor: $('#v-motor').value.trim(),
-      clienteId: estado.ctx.clienteId || null,
+      clienteId: clienteId || null,
       estado: 'activo',
       fechaAlta: hoy(),
       duenos: []
@@ -829,7 +954,9 @@
     DB.vehiculos.push(v);
     var ok = guardar();
     cerrarModal();
-    toast(ok ? 'Vehículo asociado correctamente' : 'Vehículo asociado (sin persistencia local)');
+    toast(ok
+      ? (v.clienteId ? 'Vehículo asociado correctamente' : 'Vehículo registrado: queda como "Propietario desconocido"')
+      : (v.clienteId ? 'Vehículo asociado (sin persistencia local)' : 'Vehículo registrado sin titular (sin persistencia local)'));
     estado.vista = 'vehiculo'; estado.vehiculoId = v.id; estado.tab = 'historial';
     refrescar();
   }
@@ -1517,6 +1644,23 @@ function iniciarCamara() {
     };
   }
 
+  /* Vuelco post-OCR: la lectura NUNCA dispara la búsqueda sola. Queda
+     en #scan-manual para que el operador revise y corrija cualquier
+     carácter confundido (B/8, S/5, D/0…) y confirme con "Usar" o Enter,
+     que re-evalúa la búsqueda sobre la base local. */
+  function volcarLectura(txt, dudosa) {
+    var v = String(txt || '').trim().toUpperCase();
+    var msg = $('#scan-msg');
+    var inp = $('#scan-manual');
+    msg.textContent = dudosa
+      ? 'Lectura dudosa: revisá o corregí el texto'
+      : 'Chapa leída — revisá y confirmá con "Usar"';
+    inp.value = v;
+    notaScan('El texto del lector se volcó en el campo de abajo. Si algún carácter viene mal (B/8, S/5, D/0…), corregilo y presioná "Usar" para buscar.');
+    if (window.innerWidth > 720) { inp.focus(); if (inp.select) inp.select(); }
+    if (dudosa) toast('No se pudo confirmar el formato de la chapa; revisá la lectura.', true);
+  }
+
   function capturarYLeer() {
     var video = $('#scan-video');
     var msg = $('#scan-msg');
@@ -1568,11 +1712,16 @@ function iniciarCamara() {
           var bruto = decodificarSalidaLector(tt);
           var dato = extraerPatenteOTexto(bruto);
 
-          /* Coincidencia limpia: cerrar, volcar en #q y buscar */
-          if (dato) { usarLectura(dato); return; }
+          /* Formato válido: se vuelca en el campo manual para revisión;
+             el usuario confirma con "Usar" (re-evalúa la búsqueda). */
+          if (dato) { volcarLectura(dato, false); return; }
 
           /* Sin patrón: segundo recorte sin la banda superior */
           if (corteTop < ALPR.corteBanda) { leerCaja(caja, ALPR.corteBanda); return; }
+
+          /* El lector vio algo legible pero sin formato: se ofrece igual
+             para que el operador corrija los caracteres equivocados. */
+          if (bruto && bruto.length >= 4) { volcarLectura(bruto, true); return; }
 
           fallaLectura();
         }).catch(function (e) {
@@ -1679,7 +1828,14 @@ function iniciarCamara() {
     },
     home: function () { irAlInicio(); },
     tema: function () { abrirTema(); },
-    'nuevo-registro': function () { abrirClienteModal(); },
+    /* Botón [+ Nuevo]: despliega el menú rápido (cliente / vehículo).
+       Todo otro clic lo cierra: resto de acciones, clic suelto o Escape. */
+    'nuevo-registro': function () {
+      var menu = $('#nuevo-menu');
+      if (menu) menu.hidden = !menu.hidden;
+    },
+    'menu-nuevo-cliente': function () { cerrarMenuNuevo(); abrirClienteModal(); },
+    'menu-nuevo-vehiculo': function () { cerrarMenuNuevo(); abrirVehiculoModal(null); },
     scan: function () { abrirEscaner(); },
     capturar: function () { capturarYLeer(); },
     'usar-manual': function () {
@@ -1697,6 +1853,8 @@ function iniciarCamara() {
       calcularTotal();
     },
     'guardar-ot': function () { guardarOT(); },
+    /* Editar una orden del historial: abre el mismo modal precargado */
+    'editar-ot': function (el) { cerrarMenuNuevo(); abrirEdicionOT(el.dataset.id); },
     'nuevo-vehiculo': function (el) { abrirVehiculoModal(el.dataset.cliente); },
     'guardar-vehiculo': function () { guardarVehiculo(); },
     transferir: function (el) { abrirTransfer(el.dataset.vehiculo, el.dataset.sinTitular === '1'); },
@@ -1724,18 +1882,28 @@ function iniciarCamara() {
     }
   };
 
+  function cerrarMenuNuevo() {
+    var menu = $('#nuevo-menu');
+    if (menu && !menu.hidden) menu.hidden = true;
+  }
+
   document.addEventListener('click', function (ev) {
     var el = ev.target.closest ? ev.target.closest('[data-act]') : null;
     if (!el) {
       if (ev.target.classList && ev.target.classList.contains('backdrop')) cerrarModal();
+      else cerrarMenuNuevo();     /* clic fuera del menú: se cierra */
       return;
     }
     var fn = ACCIONES[el.dataset.act];
-    if (fn) { ev.preventDefault(); fn(el, ev); }
+    if (fn) {
+      if (el.dataset.act !== 'nuevo-registro') cerrarMenuNuevo();
+      ev.preventDefault();
+      fn(el, ev);
+    }
   });
 
   document.addEventListener('keydown', function (ev) {
-    if (ev.key === 'Escape' && abierto) cerrarModal();
+    if (ev.key === 'Escape') { if (abierto) cerrarModal(); else cerrarMenuNuevo(); }
   });
 
   /* Búsqueda al enviar el formulario */

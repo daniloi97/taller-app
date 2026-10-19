@@ -40,10 +40,21 @@
           <button class="tb-btn" id="btn-tema" data-act="tema" title="Cambiar tema" aria-label="Cambiar tema">
             <span class="tb-ico" id="tema-icono"></span>
           </button>
-          <button class="tb-btn" data-act="nuevo-registro" title="Nuevo registro">
+          <button class="tb-btn" data-act="nuevo-registro" title="Nuevo cliente o vehículo">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
             <span>Nuevo</span>
           </button>
+          <!-- Menú rápido del botón [+ Nuevo]: cliente o vehículo -->
+          <div class="nuevo-menu" id="nuevo-menu" hidden>
+            <button type="button" class="nuevo-item" data-act="menu-nuevo-cliente">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+              <span><b>Nuevo Cliente</b><small>Alta rápida de un titular con DNI</small></span>
+            </button>
+            <button type="button" class="nuevo-item" data-act="menu-nuevo-vehiculo">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 17h14M6 17v2M18 17v2M4.5 12.5 6 7a1.5 1.5 0 0 1 1.4-1h9.2A1.5 1.5 0 0 1 18 7l1.5 5.5"/><path d="M3 12.5h18v4a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/><circle cx="7.5" cy="15" r="1"/><circle cx="16.5" cy="15" r="1"/></svg>
+              <span><b>Nuevo Vehículo</b><small>Con propietario o sin titular</small></span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -164,6 +175,17 @@
     </div>
     <form class="sheet-bd" id="vehForm">
       <div class="form-grid">
+        <div class="span-2" id="veh-holder">
+          <label class="lb" for="v-cliente">Propietario</label>
+          <select class="inp" id="v-cliente" name="propietario"></select>
+        </div>
+        <label class="switch-row span-2" for="v-sin-titular" id="v-sinrow" hidden>
+          <input type="checkbox" id="v-sin-titular">
+          <span>
+            <b>Registrar como &ldquo;Propietario desconocido&rdquo;</b>
+            <small>El vehículo queda activo pero sin titular asociado: disponible para recibir órdenes de trabajo hasta que le asignes uno.</small>
+          </span>
+        </label>
         <div>
           <label class="lb" for="v-patente">Patente *</label>
           <input class="inp mono" id="v-patente" name="patente" required placeholder="AB123CD" autocapitalize="characters" spellcheck="false" maxlength="9">
@@ -325,7 +347,7 @@
         <div id="scan-note-txt"></div>
       </div>
       <div class="mt14">
-        <label class="lb" for="scan-manual">Lectura manual (si la cámara no está disponible)</label>
+        <label class="lb" for="scan-manual">Lectura — revisá el texto o escribí la patente manualmente</label>
         <div class="row">
           <input class="inp mono" id="scan-manual" placeholder="AB123CD o ABC123" autocapitalize="characters" spellcheck="false">
           <button class="btn primary" data-act="usar-manual" style="flex:none">Usar</button>

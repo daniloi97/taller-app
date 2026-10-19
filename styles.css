@@ -1195,3 +1195,45 @@ select.inp{
     font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:#64748b;
   }
 }
+
+/* ============================================================================
+   23. MENÚ RÁPIDO DEL BOTÓN [+ NUEVO] Y EDITAR ORDEN DEL HISTORIAL
+   ============================================================================ */
+.topbar-actions{position:relative}     /* ancla del menú desplegable */
+
+.nuevo-menu{
+  position:absolute;top:calc(100% + 8px);right:0;z-index:50;
+  min-width:240px;padding:6px;
+  display:flex;flex-direction:column;gap:4px;
+  background:var(--panel);border:1px solid var(--line);border-radius:14px;
+  box-shadow:var(--shadow);
+}
+.nuevo-item{
+  display:flex;align-items:center;gap:11px;width:100%;
+  padding:10px 12px;border:0;border-radius:10px;
+  background:transparent;color:var(--ink);cursor:pointer;
+  font:inherit;text-align:left;
+}
+.nuevo-item svg{
+  width:21px;height:21px;flex:none;padding:7px;
+  background:var(--brand-soft);border:1px solid var(--brand-line);
+  border-radius:9px;color:var(--brand-text);box-sizing:content-box;
+}
+.nuevo-item b{display:block;font-size:13.5px}
+.nuevo-item small{display:block;margin-top:1px;font-size:11.5px;color:var(--muted)}
+.nuevo-item:hover{background:var(--panel-2)}
+
+/* Botón Editar de cada tarjeta del historial de servicios */
+.tl-edit{
+  display:inline-flex;align-items:center;gap:5px;
+  padding:5px 10px;border:1px solid var(--line);border-radius:999px;
+  background:transparent;color:var(--muted);cursor:pointer;
+  font:inherit;font-size:11.5px;font-weight:700;
+}
+.tl-edit svg{width:12px;height:12px;flex:none}
+.tl-edit:hover{background:var(--brand-soft);border-color:var(--brand-line);color:var(--brand-text)}
+
+@media (max-width:720px){
+  .nuevo-menu{min-width:200px}
+  .nuevo-item{padding:12px 10px}       /* zona táctil más generosa */
+}
