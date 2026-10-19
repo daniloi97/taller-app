@@ -1034,7 +1034,7 @@
     $('#scan-note-txt').textContent = txt;
   }
 
-  function iniciarCamara() {
+function iniciarCamara() {
     var msg = $('#scan-msg');
     var video = $('#scan-video');
     msg.textContent = 'Iniciando cámara…';
@@ -1045,11 +1045,6 @@
       return;
     }
 
-    /* Muestra el stream en el <video>. La preview sigue usando
-       object-fit:cover y rectROIEnVideo() deshace ese mapeo con los
-       videoWidth/Height reales del sensor: así la imagen no se deforma
-       y el cálculo de la ROI del OCR queda inalterado, sin importar
-       qué lente (1x u otro) terminó activándose. */
     function mostrar(s) {
       stream = s;
       video.srcObject = s;
@@ -1062,32 +1057,37 @@
       return navigator.mediaDevices.getUserMedia(cs);
     }
 
-    /* Restricción avanzada `advanced` = "deseable, no obligatoria": en
-       móviles con varios lentes traseros pide el sensor principal (zoom 1x)
-       en lugar del ultra gran angular 0.5x que Chromium elige por defecto.
-       Los navegadores modernos la ignoran con elegancia si no soportan
-       zoom; los que no toleran la clave caen en el intento de abajo. */
-    var csPrincipal = {
+    /* Intento 1: Fuerza Zoom 2x (encuadre cómodo desde más lejos) */
+    var csZoom2 = {
+      video: { facingMode: { ideal: 'environment' }, advanced: [{ zoom: 2.0 }] },
+      audio: false
+    };
+
+    /* Intento 2: Si no soporta 2x, busca Zoom 1x (lente principal) */
+    var csZoom1 = {
       video: { facingMode: { ideal: 'environment' }, advanced: [{ zoom: 1.0 }] },
       audio: false
     };
 
-    /* Respaldo: restricciones convencionales, idénticas a las de siempre. */
+    /* Intento 3: Respaldo convencional sin parámetros de zoom */
     var csConvencional = {
       video: { facingMode: { ideal: 'environment' } },
       audio: false
     };
 
-    pedir(csPrincipal)
+    /* Cascada de promesas: 2x -> 1x -> Convencional */
+    pedir(csZoom2)
       .then(mostrar)
       .catch(function () {
-        /* OverconstrainedError, clave `advanced` desconocida o error
-           propio del lente: se reintenta sin ella antes de rendirse. */
-        pedir(csConvencional)
+        pedir(csZoom1)
           .then(mostrar)
           .catch(function () {
-            msg.textContent = 'No se pudo acceder a la cámara';
-            notaScan('Permiso denegado o cámara ocupada. Podés escribir la patente manualmente abajo.');
+            pedir(csConvencional)
+              .then(mostrar)
+              .catch(function () {
+                msg.textContent = 'No se pudo acceder a la cámara';
+                notaScan('Permiso denegado o cámara ocupada. Podés escribir la patente manualmente abajo.');
+              });
           });
       });
   }
