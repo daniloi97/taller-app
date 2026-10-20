@@ -2332,6 +2332,10 @@ function iniciarCamara() {
   $('#login-otp').addEventListener('keydown', function (ev) {
     if (ev.key === 'Enter') { ev.preventDefault(); ACCIONES['login-verificar']($('#login-verificar')); }
   });
+  /* Enter en "Nombre del taller": también verifica (mismo botón) */
+  $('#login-taller').addEventListener('keydown', function (ev) {
+    if (ev.key === 'Enter') { ev.preventDefault(); ACCIONES['login-verificar']($('#login-verificar')); }
+  });
 
   /* Switch "Propietario desconocido" vs. datos del nuevo titular */
   $('#tr-sin-titular').addEventListener('change', alternarDatosTitular);
@@ -2369,12 +2373,14 @@ function iniciarCamara() {
      ========================================================== */
   var telefonoLogin = '';
 
-  /* Pantalla completa de login: resetea ambos pasos y roba el foco */
+  /* Vista raíz LOGIN: única visible hasta verificar el OTP. La
+     conmutación es por clase .activa entre #vista-login y
+     #vista-app (modelo de vistas raíz; sin overlays ocultos). */
   function mostrarLogin(mensajeEstado) {
-    var vista = $('#login-vista');
-    if (!vista) return;
-    vista.hidden = false;
-    document.body.classList.add('sin-sesion');
+    var login = $('#vista-login');
+    var app = $('#vista-app');
+    if (login) login.classList.add('activa');
+    if (app) app.classList.remove('activa');
     $('#login-paso1').hidden = false;
     $('#login-paso2').hidden = true;
     $('#login-tel').value = '';
@@ -2385,12 +2391,13 @@ function iniciarCamara() {
     if (tel) tel.focus();
   }
 
-  function cerrarLogin() {
-    var vista = $('#login-vista');
-    if (vista) vista.hidden = true;
-    document.body.classList.remove('sin-sesion');
+  /* VISTA RAÍZ APP: activa el dashboard del taller (sesión válida) */
+  function mostrarApp() {
+    var login = $('#vista-login');
+    var app = $('#vista-app');
+    if (app) app.classList.add('activa');
+    if (login) login.classList.remove('activa');
   }
-
   /* Topbar: nombre del taller logueado (vacío si no hay sesión) */
   function mostrarSesionUI() {
     var u = usuarioSesion();
@@ -2437,7 +2444,8 @@ function iniciarCamara() {
     if (!ok || !verificado || !verificado.token) return;
     guardarSesion(verificado.token, verificado.usuario || null);
     mostrarSesionUI();
-    cerrarLogin();
+    mostrarApp();
+    console.info('[auth] Token guardado y sesión iniciada');
     var nombre = verificado.usuario && verificado.usuario.nombreTaller;
     toast('Ingresaste al taller' + (nombre ? ' — ' + nombre : ''));
     arrancarDatos();
@@ -2503,8 +2511,10 @@ function iniciarCamara() {
      token ya no vale, el primer 401 corta la sesión y muestra el login. */
   mostrarSesionUI();
   if (!tokenSesion()) {
-    mostrarLogin();
+    mostrarLogin();          /* gate: la vista login es la activa hasta verificar */
   } else {
+    mostrarApp();            /* sesión guardada: el dashboard es la vista activa; si
+                                el token no vale, el primer 401 corta y vuelve al login */
     arrancarDatos();
   }
 })();
