@@ -1,4 +1,24 @@
+# Dependencias
 node_modules/
+
+# Base de datos local (SQLite y sidecars WAL/SHM; *.db por si cambia DB_PATH)
 data/
+*.sqlite
+*.sqlite3
+*.sqlite-shm
+*.sqlite-wal
+*.db
+
+# Variables de entorno y secretos (nunca commitear el .env real)
 .env
+.env.*
+*.env
+
+# Logs
+logs/
 *.log
+npm-debug.log*
+
+# Sistema operativo
+Thumbs.db
+.DS_Store

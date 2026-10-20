@@ -11,15 +11,30 @@
 
 require('dotenv').config();
 const express = require('express');
+const helmet = require('helmet');
 const cors = require('cors');
 const db = require('./db');
 const { ApiError } = require('./utils/errors');
+const auth = require('./routes/auth');
 
 const app = express();
 app.disable('x-powered-by');
 
 /* ------------------------------------------------------------- básicos */
+const ES_PRODUCCION = process.env.NODE_ENV === 'production';
+
+/* Cabeceras de seguridad HTTP (CSP, nosniff, X-Frame-Options, HSTS…).
+   Sobre APIs que sólo responden JSON son inofensivas y protegen si algún
+   día se sirve HTML desde acá. */
+app.use(helmet());
+
+/* CORS: reflexivo por defecto (dev local). En producción se EXIGE una lista
+   de orígenes — el proceso se niega a arrancar si no está configurada. */
 const ORIGEN = process.env.CORS_ORIGIN || '*';
+if (ES_PRODUCCION && (!process.env.CORS_ORIGIN || ORIGEN === '*')) {
+  console.error('[api] FATAL: con NODE_ENV=production no se admite CORS abierto (*). Seteá CORS_ORIGIN con los orígenes del frontend (separados por coma).');
+  process.exit(1);
+}
 app.use(cors({ origin: ORIGEN === '*' ? true : ORIGEN.split(',').map(function (o) { return o.trim(); }) }));
 app.use(express.json({ limit: '200kb' }));
 
@@ -41,16 +56,31 @@ api.get('/health', function (req, res) {
   res.json({
     ok: true,
     driver: db.driver,
-    db: db.DB_PATH,
+    /* En producción no se filtra la ruta de la BD del servidor */
+    db: ES_PRODUCCION ? undefined : db.DB_PATH,
     consultable: db.chequearConexion()
   });
 });
 
-api.use('/clientes', require('./routes/clientes'));
-api.use('/vehiculos', require('./routes/vehiculos'));
-/* ordenes monta en la raíz: expone tanto /ordenes/* como
-   /vehiculos/:vehiculoId/ordenes (sin colisionar con el módulo vehiculos) */
-api.use('/', require('./routes/ordenes'));
+/* ---- AUTENTICACIÓN (público): pedir y verificar el OTP por teléfono ---- */
+api.use('/auth', auth.router);
+
+/* ---- RUTAS DEL NEGOCIO: exigir Authorization: Bearer <token> (JWT) ------ */
+api.use('/clientes', auth.proteger, require('./routes/clientes'));
+api.use('/vehiculos', auth.proteger, require('./routes/vehiculos'));
+/* ordenes monta en la raíz porque responde a /ordenes/* y a
+   /vehiculos/:vehiculoId/ordenes (paths absolutos). Al montarlo con un
+   prefijo sus rutas quedarían relativas y no matchearían (verificado en
+   pruebas). El proteger comodín evalúa el path: sólo las 2 familias del
+   negocio exigen token — cualquier ruta inexistente que llegue acá
+   (p.ej. /auth/inventado) sigue respondiendo 404 pública. */
+function protegerNegocio(req, res, next) {
+  if (req.path.indexOf('/ordenes') === 0 || req.path.indexOf('/vehiculos') === 0) {
+    return auth.proteger(req, res, next);
+  }
+  next();
+}
+api.use('/', protegerNegocio, require('./routes/ordenes'));
 
 app.use('/api/v1', api);
 
@@ -93,8 +123,11 @@ app.use(function (err, req, res, next) {
       });
     }
     if (err.code.indexOf('CHECK') > 0) {
+      /* Los mensajes del driver pueden incluir fragmentos del SQL y los
+         valores que fallaron: quedan sólo en el log del servidor. */
+      console.error('[api][SQLITE CHECK] ' + (err.stack || err.message));
       return res.status(400).json({
-        error: { codigo: 'CHEQUEO_DATOS', mensaje: 'Un campo no cumple el dominio definido', detalle: err.message }
+        error: { codigo: 'CHEQUEO_DATOS', mensaje: 'Un campo no cumple el dominio definido' }
       });
     }
   }

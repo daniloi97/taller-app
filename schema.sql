@@ -167,6 +167,27 @@ CREATE TABLE IF NOT EXISTS repuestos_orden (
 
 CREATE INDEX IF NOT EXISTS idx_repuestos_orden ON repuestos_orden (orden_id);
 
+-- ---------------------------------------------------------------------------
+-- 7) USUARIOS — acceso del taller (Fase 1: login por teléfono + OTP / JWT).
+--    Tabla de seguridad autónoma: SIN FK (el token lleva el id). Un registro
+--    por número de WhatsApp; el primer teléfono que verifica el OTP queda
+--    como 'admin' del taller. Los códigos OTP viven en memoria del server
+--    (Fase 2: pasan a ser efímeros por WhatsApp + Cloud API).
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS usuarios (
+  id            VARCHAR(36)  NOT NULL,
+  telefono      VARCHAR(30)  NOT NULL,
+  nombre_taller VARCHAR(120),
+  rol           VARCHAR(20)  DEFAULT 'admin',
+  created_at    TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT pk_usuarios PRIMARY KEY (id),
+  CONSTRAINT ck_usuarios_telefono CHECK (telefono <> '')
+);
+
+-- Número único (la clave de negocio del login): UNIQUE INDEX explícito,
+-- siguiendo la convención del esquema (índice con nombre, no inline)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_usuarios_telefono ON usuarios (telefono);
+
 COMMIT;
 
 /* ============================================================================

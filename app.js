@@ -7,7 +7,8 @@
      guarda datos — cada consulta y mutación (altas, transferencias,
      órdenes, bajas) viaja por HTTP con apiFetch(). El indicador de
      actividad y el bloqueo anti doble-submit acompañan a cada request.
-     En localStorage queda sólo el tema elegido.
+     En localStorage quedan: el tema elegido (taller_tema), el token de
+     sesión (taller_token) y el usuario logueado (taller_usuario).
    · Búsqueda dual automática por patente o DNI en un solo input.
    · Un cliente puede tener VARIOS vehículos activos a la vez; cada tarjeta
      permite crear su propia Orden de Trabajo o ver su ficha. Un vehículo
@@ -152,6 +153,34 @@
   };
 
   /* ---------------------------------------------------------------
+     Sesión (Fase 1 de autenticación: teléfono + OTP → JWT de 30 días)
+     · localStorage: taller_token (JWT firmado) + taller_usuario.
+     · apiFetch adjunta Authorization: Bearer <token> si existe.
+     · Un 401 de la API invälida la sesión y regresa al login.
+     --------------------------------------------------------------- */
+  var TOKEN_KEY = 'taller_token';
+  var USUARIO_KEY = 'taller_usuario';
+
+  function tokenSesion() {
+    try { return localStorage.getItem(TOKEN_KEY) || ''; } catch (e) { return ''; }
+  }
+
+  function usuarioSesion() {
+    try { var u = JSON.parse(localStorage.getItem(USUARIO_KEY) || 'null'); return u || null; }
+    catch (e) { return null; }
+  }
+
+  function guardarSesion(token, usuario) {
+    try { localStorage.setItem(TOKEN_KEY, token); } catch (e) { /* private mode */ }
+    try { localStorage.setItem(USUARIO_KEY, JSON.stringify(usuario || null)); } catch (e) {}
+  }
+
+  function limpiarSesion() {
+    try { localStorage.removeItem(TOKEN_KEY); } catch (e) {}
+    try { localStorage.removeItem(USUARIO_KEY); } catch (e) {}
+  }
+
+  /* ---------------------------------------------------------------
      Helper genérico de la API (requisito 1):
        · cabecera 'Content-Type: application/json' por defecto;
        · si !response.ok extrae el mensaje del JSON de error y lanza
@@ -167,6 +196,9 @@
       headers: { 'Content-Type': 'application/json' },
       cache: 'no-store'
     };
+    /* Sesión: el JWT de taller_token viaja en TODAS las peticiones */
+    var token = tokenSesion();
+    if (token) init.headers.Authorization = 'Bearer ' + token;
     if (opts.body !== undefined) init.body = JSON.stringify(opts.body);
 
     var respuesta;
@@ -179,6 +211,16 @@
     }
 
     if (!respuesta.ok) {
+      /* Token vencido/inválido en una ruta protegida: cortar sesión y
+         regresar al login (no hay bucle: /auth/* no responde 401). */
+      if (respuesta.status === 401) {
+        limpiarSesion();
+        mostrarSesionUI();
+        mostrarLogin('Tu sesión venció o el token no es válido. Ingresá de nuevo.');
+        var msg401 = 'Sesión vencida: volvé a ingresar con tu WhatsApp';
+        toast(msg401, true);
+        throw Object.assign(new Error(msg401), { status: 401 });
+      }
       var msg = 'Error HTTP ' + respuesta.status;
       try {
         var cuerpo = await respuesta.json();
@@ -2153,6 +2195,11 @@ function iniciarCamara() {
     },
     'menu-nuevo-cliente': function () { cerrarMenuNuevo(); abrirClienteModal(); },
     'menu-nuevo-vehiculo': function () { cerrarMenuNuevo(); abrirVehiculoModal(null); },
+    /* Sesión: login por OTP (dos pasos) y cierre de sesión */
+    'login-enviar': function (el) { loginEnviar(el); },
+    'login-verificar': function (el) { loginVerificar(el); },
+    'login-cambiar-numero': function () { volverPaso1(); },
+    logout: function () { cerrarSesion(); },
     scan: function () { abrirEscaner(); },
     capturar: function () { capturarYLeer(); },
     'usar-manual': function () {
@@ -2274,6 +2321,14 @@ function iniciarCamara() {
     if (ev.key === 'Enter') { ev.preventDefault(); ACCIONES['usar-manual'](); }
   });
 
+  /* Enter en el login: paso 1 envía el código, paso 2 verifica */
+  $('#login-tel').addEventListener('keydown', function (ev) {
+    if (ev.key === 'Enter') { ev.preventDefault(); ACCIONES['login-enviar']($('#login-enviar')); }
+  });
+  $('#login-otp').addEventListener('keydown', function (ev) {
+    if (ev.key === 'Enter') { ev.preventDefault(); ACCIONES['login-verificar']($('#login-verificar')); }
+  });
+
   /* Switch "Propietario desconocido" vs. datos del nuevo titular */
   $('#tr-sin-titular').addEventListener('change', alternarDatosTitular);
 
@@ -2302,7 +2357,134 @@ function iniciarCamara() {
   });
 
   /* ==========================================================
-     21. Arranque
+     21. Sesión y login (autenticación por teléfono + OTP, Fase 1)
+     La vista de login cubre la app hasta verificar el código. El
+     OTP viaja por WhatsApp (Fase 1: mock — códigos en la consola
+     del servidor; con NODE_ENV=development la API además los
+     devuelve en la respuesta para probar sin celular).
+     ========================================================== */
+  var telefonoLogin = '';
+
+  /* Pantalla completa de login: resetea ambos pasos y roba el foco */
+  function mostrarLogin(mensajeEstado) {
+    var vista = $('#login-vista');
+    if (!vista) return;
+    vista.hidden = false;
+    document.body.classList.add('sin-sesion');
+    $('#login-paso1').hidden = false;
+    $('#login-paso2').hidden = true;
+    $('#login-tel').value = '';
+    $('#login-otp').value = '';
+    $('#login-taller').value = '';
+    $('#login-estado').textContent = mensajeEstado || '';
+    var tel = $('#login-tel');
+    if (tel) tel.focus();
+  }
+
+  function cerrarLogin() {
+    var vista = $('#login-vista');
+    if (vista) vista.hidden = true;
+    document.body.classList.remove('sin-sesion');
+  }
+
+  /* Topbar: nombre del taller logueado (vacío si no hay sesión) */
+  function mostrarSesionUI() {
+    var u = usuarioSesion();
+    var pill = $('#sesion-taller');
+    if (pill) pill.textContent = u && u.nombreTaller ? u.nombreTaller : '';
+  }
+
+  /* Paso 1 → pedir código. ConEnvio desactiva el botón mientras corre. */
+  async function loginEnviar(btn) {
+    var tel = String($('#login-tel').value || '').replace(/[^\d+]/g, '');
+    if (tel.length < 8 || tel.length > 15) {
+      toast('Número inválido: ingresá tu WhatsApp en formato internacional, p.ej. 5491112345678', true);
+      return;
+    }
+    telefonoLogin = tel;
+    var est = $('#login-estado');
+    var ok = await conEnvio(btn, async function () {
+      var r = await api('/auth/request-otp', { method: 'POST', body: { telefono: tel } });
+      if (r && r.dev && r.dev.otp) {
+        /* Sólo aparece con el backend en NODE_ENV=development (mock) */
+        est.textContent = 'Código ' + r.dev.otp + ' — (visible sólo porque el backend está en desarrollo)';
+      } else {
+        est.textContent = 'Código enviado: revisá tu chat de WhatsApp.';
+      }
+    });
+    if (!ok) return;               /* el toast del error ya avisó */
+    $('#login-paso1').hidden = true;
+    $('#login-paso2').hidden = false;
+    $('#login-otp').focus();
+  }
+
+  /* Paso 2 → verificar: guarda token+usuario y hace arrancar la app */
+  async function loginVerificar(btn) {
+    var otp = String($('#login-otp').value || '').replace(/\D/g, '');
+    if (otp.length !== 6) { toast('Ingresá el código de 6 dígitos', true); return; }
+    var nombreTaller = String($('#login-taller').value || '').trim();
+    var verificado = null;
+    var ok = await conEnvio(btn, async function () {
+      verificado = await api('/auth/verify-otp', {
+        method: 'POST',
+        body: { telefono: telefonoLogin, otp: otp, nombreTaller: nombreTaller }
+      });
+    });
+    if (!ok || !verificado || !verificado.token) return;
+    guardarSesion(verificado.token, verificado.usuario || null);
+    mostrarSesionUI();
+    cerrarLogin();
+    var nombre = verificado.usuario && verificado.usuario.nombreTaller;
+    toast('Ingresaste al taller' + (nombre ? ' — ' + nombre : ''));
+    arrancarDatos();
+  }
+
+  function volverPaso1() {
+    $('#login-paso1').hidden = false;
+    $('#login-paso2').hidden = true;
+    $('#login-estado').textContent = '';
+    $('#login-tel').focus();
+  }
+
+  /* Salir: borra token+usuario, resetea navegación y datos en memoria y
+     vuelve a la pantalla de login */
+  function cerrarSesion() {
+    limpiarSesion();
+    estado.vista = 'inicio';
+    estado.clienteId = null;
+    estado.vehiculoId = null;
+    estado.tab = 'historial';
+    estado.ctx = {};
+    DATOS.clientes = null;
+    DATOS.vehiculos = null;
+    DATOS.fichaCliente = null;
+    DATOS.fichaVehiculo = null;
+    DATOS.ordenes = [];
+    cerrarMenuNuevo();
+    if (abierto) cerrarModal();
+    $('#q').value = '';
+    renderInicio();
+    mostrarSesionUI();
+    mostrarLogin();
+  }
+
+  /* Datos + deep-link: corre recién con sesión activa (tras el login o
+     al arrancar con un token guardado). */
+  function arrancarDatos() {
+    (async function () {
+      try { await Promise.all([traerClientes(), traerVehiculos()]); }
+      catch (e) { /* apiFetch ya notificó una sola vez */ }
+    })();
+    /* Deep-link simple por hash: #patente o #dni */
+    if (location.hash.length > 1) {
+      var hashVal = decodeURIComponent(location.hash.slice(1));
+      $('#q').value = hashVal;
+      buscar(hashVal, null);
+    }
+  }
+
+  /* ==========================================================
+     22. Arranque
      ========================================================== */
   /* Tema: preferencia guardada en este dispositivo (por defecto claro,
      igual que el script anti-parpadeo del <head>) */
@@ -2312,19 +2494,13 @@ function iniciarCamara() {
 
   renderInicio();
 
-  /* Precarga silenciosa de las listas del taller: el buscador, los chips
-     y los select de los modales responden al instante la primera vez.
-     Si la API no está levantada no bloqueamos la app — el usuario verá
-     el aviso (toast) al hacer su primera acción. */
-  (async function () {
-    try { await Promise.all([traerClientes(), traerVehiculos()]); }
-    catch (e) { /* apiFetch ya notificó una sola vez */ }
-  })();
-
-  /* Deep-link simple por hash: #patente o #dni */
-  if (location.hash.length > 1) {
-    var hashVal = decodeURIComponent(location.hash.slice(1));
-    $('#q').value = hashVal;
-    buscar(hashVal, null);
+  /* Gate de sesión (Fase 1 de auth): sin taller_token la app queda cubierta
+     por la pantalla de login; con token guardado arranca directo — si el
+     token ya no vale, el primer 401 corta la sesión y muestra el login. */
+  mostrarSesionUI();
+  if (!tokenSesion()) {
+    mostrarLogin();
+  } else {
+    arrancarDatos();
   }
 })();

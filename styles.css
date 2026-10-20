@@ -1252,3 +1252,40 @@ select.inp{
 .modo-op input{width:14px;height:14px;flex:none;margin:0;accent-color:var(--brand)}
 .modo-op:has(input:checked){background:var(--brand-soft);border-color:var(--brand);color:var(--brand-text)}
 .modo-hint{display:block;margin-top:7px;font-size:11.5px;color:var(--muted)}
+
+/* ============================================================
+   LOGIN / SESIÓN (Fase 1: teléfono + OTP mock → JWT de 30 días)
+   La vista cubre la app completa hasta verificar el código.
+   ============================================================ */
+.login-vista{
+  position:fixed;inset:0;z-index:10000;
+  background:var(--bg);
+  display:flex;align-items:center;justify-content:center;
+  padding:16px;overflow:auto;
+}
+body.sin-sesion{overflow:hidden}
+.login-card{max-width:380px;width:100%;padding:26px 22px 20px;text-align:center}
+.login-logo{
+  width:46px;height:46px;border-radius:14px;
+  background:var(--brand);
+  display:flex;align-items:center;justify-content:center;
+  margin:0 auto 12px;box-shadow:var(--shadow-sm);
+}
+.login-logo svg{width:24px;height:24px}
+.login-card h2{font-size:18px;letter-spacing:-.2px;margin-bottom:4px}
+.login-card>p{margin-bottom:16px}
+.login-card label{text-align:left;display:block}
+/* Código de 6 dígitos: grandes y espaciados con hueco visual */
+.otp-inp{
+  font-size:24px;font-weight:700;letter-spacing:.42em;
+  text-align:center;padding:10px 8px 10px 14px;caret-color:var(--brand);
+}
+/* Píldora del taller activo en la topbar (la topbar es oscura en ambos temas) */
+.sesion-pill{
+  display:inline-flex;align-items:center;
+  font-size:12px;font-weight:650;color:#e8eefb;
+  background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.22);
+  border-radius:999px;padding:5px 11px;
+  max-width:170px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.sesion-pill:empty{display:none}

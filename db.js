@@ -71,13 +71,11 @@ function ejecutarSchema() {
   exec(fs.readFileSync(SCHEMA_PATH, 'utf8'));
 }
 
-function baseEstaCreada() {
-  const t = sqlite.prepare("SELECT 1 AS ok FROM sqlite_master WHERE type='table' AND name='clientes'").get();
-  return !!t;
-}
-
-/* Auto-aplicación inicial (req. Nº 1 de db.js): base vacía → schema */
-if (!baseEstaCreada()) ejecutarSchema();
+/* Aplicación de schema SIEMPRE en el arranque: en base vacía crea TODO; sobre una
+   base previa re-ejecuta el DDL idempotente (CREATE ... IF NOT EXISTS) y añade
+   las tablas nuevas sin perder datos (así la tabla `usuarios` de la Fase 1
+   de auth también aparece en un taller.sqlite creado antes del update). */
+ejecutarSchema();
 
 function nuevoId() {
   return crypto.randomUUID();
