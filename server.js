@@ -11,6 +11,7 @@
 
 require('dotenv').config();
 const express = require('express');
+const helmet = require('helmet');
 const cors = require('cors');
 const db = require('./db');
 const { ApiError } = require('./utils/errors');
@@ -19,7 +20,20 @@ const app = express();
 app.disable('x-powered-by');
 
 /* ------------------------------------------------------------- básicos */
+const ES_PRODUCCION = process.env.NODE_ENV === 'production';
+
+/* Cabeceras de seguridad HTTP: CSP, nosniff, X-Frame-Options, HSTS,
+   Referrer-Policy, etc. Sobre una API que sólo devuelve JSON son
+   inofensivos, pero protegen si algún día se sirve HTML desde acá. */
+app.use(helmet());
+
+/* CORS: reflexivo por defecto (dev local). En producción se EXIGE una
+   lista de orígenes: refused-to-start si no está configurada (fail-closed). */
 const ORIGEN = process.env.CORS_ORIGIN || '*';
+if (ES_PRODUCCION && (!process.env.CORS_ORIGIN || ORIGEN === '*')) {
+  console.error('[api] FATAL: con NODE_ENV=production no se admite CORS abierto (*). Seteá CORS_ORIGIN con los orígenes del frontend (separados por coma).');
+  process.exit(1);
+}
 app.use(cors({ origin: ORIGEN === '*' ? true : ORIGEN.split(',').map(function (o) { return o.trim(); }) }));
 app.use(express.json({ limit: '200kb' }));
 
@@ -41,7 +55,8 @@ api.get('/health', function (req, res) {
   res.json({
     ok: true,
     driver: db.driver,
-    db: db.DB_PATH,
+    /* En producción no se filtra la ruta de la BD del servidor */
+    db: ES_PRODUCCION ? undefined : db.DB_PATH,
     consultable: db.chequearConexion()
   });
 });
@@ -93,8 +108,12 @@ app.use(function (err, req, res, next) {
       });
     }
     if (err.code.indexOf('CHECK') > 0) {
+      /* err.message de better-sqlite3 puede incluir fragmentos del SQL y los
+         valores que fallaron: no se mandan al cliente. El detalle queda
+         registrado sólo en el log del servidor. */
+      console.error('[api][SQLITE CHECK] ' + (err.stack || err.message));
       return res.status(400).json({
-        error: { codigo: 'CHEQUEO_DATOS', mensaje: 'Un campo no cumple el dominio definido', detalle: err.message }
+        error: { codigo: 'CHEQUEO_DATOS', mensaje: 'Un campo no cumple el dominio definido' }
       });
     }
   }

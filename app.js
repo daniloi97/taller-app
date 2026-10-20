@@ -50,12 +50,16 @@
     } catch (e) { return '$ ' + v.toLocaleString('es-AR'); }
   }
   function num(n) { return (Number(n) || 0).toLocaleString('es-AR'); }
+  /* Defensa XSS: fecha() alimenta innerHTML en varias vistas. Si el valor
+     de la BD viene malformado (p.ej. DB editada a mano o import externo),
+     se escapa en lugar de inyectarse crudo. Las fechas válidas jamás
+     entran por acá (requires YYYY-MM-DD y se validan en la API). */
   function fecha(iso) {
     if (!iso) return '—';
     var d = new Date(iso + 'T00:00:00');
-    if (isNaN(d)) return iso;
+    if (isNaN(d)) return esc(iso);
     try { return d.toLocaleDateString('es-AR', { day: '2-digit', month: 'short', year: 'numeric' }); }
-    catch (e) { return iso; }
+    catch (e) { return esc(iso); }
   }
   function hoy() { return new Date().toISOString().slice(0, 10); }
   function norm(s) { return String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); }
