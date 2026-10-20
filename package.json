@@ -1,0 +1,21 @@
+{
+  "name": "historia-clinica-vehicular-api",
+  "version": "1.0.0",
+  "description": "API REST del taller mecánico — Express + SQLite (better-sqlite3) sobre schema.sql",
+  "main": "server.js",
+  "private": true,
+  "scripts": {
+    "setup": "node scripts/setup-db.js",
+    "start": "node server.js",
+    "arranque": "npm run setup && npm start"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.10.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2"
+  }
+}
