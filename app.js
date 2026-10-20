@@ -212,14 +212,19 @@
       chip.innerHTML =
         '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 3a9 9 0 1 0 9 9"/></svg> ' +
         '<span>Consultando la base…</span>';
+      /* El display NO viaja por cssText: un "display:flex" inline pisa el
+         [hidden]{display:none} del hoja del browser (estilo inline gana)
+         y el chip quedaba visible para siempre. Lo maneja api() con
+         style.display explícito flex/none, que siempre decide. */
       chip.style.cssText =
         'position:fixed;bottom:14px;left:50%;transform:translateX(-50%);z-index:9999;' +
-        'display:flex;align-items:center;gap:7px;padding:7px 12px;border-radius:999px;' +
+        'align-items:center;gap:7px;padding:7px 12px;border-radius:999px;' +
         'font-size:12px;font-weight:600;background:#111827;color:#e5e7eb;' +
         'border:1px solid rgba(148,163,184,.35);box-shadow:0 8px 24px rgba(0,0,0,.35);' +
         'pointer-events:none';
       chip.querySelector('svg').style.cssText = 'animation:api-spin .9s linear infinite;';
       document.body.appendChild(chip);
+      chip.style.display = 'none';   /* estado inicial: oculto SIEMPRE */
       if (!chipEstiloInyectado) {
         var st = document.createElement('style');
         st.textContent = '@keyframes api-spin{to{transform:rotate(360deg)}}';
@@ -234,13 +239,17 @@
     peticionesEnVuelo++;
     var chip = chipOcupado();
     chip.hidden = false;
+    chip.style.display = 'flex';
     try {
       return await apiFetch(endpoint, options);
     } finally {
+      /* Oculto ESTRICTO al terminar la promesa: finally corra con éxito,
+         error de red o error HTTP — jamás queda el indicador colgado. */
       peticionesEnVuelo--;
       if (peticionesEnVuelo <= 0) {
         peticionesEnVuelo = 0;
         chip.hidden = true;
+        chip.style.display = 'none';
       }
     }
   }
@@ -464,14 +473,23 @@
   }
 
   function renderSinResultados(q) {
+    /* nq = consulta normalizada (misma regla que norm()). Todo-dígitos =>
+       el alta sugerida es la de CLIENTE con el DNI precargado; cualquier
+       otra cosa (patente/fra ge o texto del escáner) abre el alta de
+       VEHÍCULO con la patente ya en el campo. */
+    var nq = norm(q);
+    var esDni = /^\d+$/.test(nq);
     RESULTS.innerHTML =
       '<section class="card fade-in"><div class="empty">' +
         ICON.alert +
         '<h3>Sin resultados para “' + esc(q) + '”</h3>' +
         '<p>No encontramos ningún cliente ni vehículo con ese dato.</p>' +
         '<div class="row" style="justify-content:center;flex-wrap:wrap;margin-top:16px">' +
-          '<button class="btn primary" data-act="menu-nuevo-cliente">' + ICON.plus + ' Registrar cliente</button>' +
-          '<button class="btn" data-act="scan">' + ICON.search + ' Escanear otra vez</button>' +
+          (esDni
+            ? '<button class="btn primary" data-act="nuevo-cliente" data-dni="' + esc(nq) + '">' + ICON.plus + ' Registrar cliente DNI ' + esc(nq) + '</button>' +
+              '<button class="btn" data-act="chip" data-type="dni">' + ICON.user + ' Ver todos los clientes</button>'
+            : '<button class="btn primary" data-act="nuevo-vehiculo" data-patente="' + esc(nq) + '">' + ICON.car + ' Registrar vehículo ' + esc(nq) + '</button>' +
+              '<button class="btn" data-act="scan">' + ICON.search + ' Escanear otra vez</button>') +
         '</div>' +
       '</div></section>';
   }
@@ -1126,7 +1144,7 @@
        si se llega desde la ficha de un cliente).
      · nuevo      → se crea la ficha del titular inline y se vincula.
      · desconocido→ nace "Propietario desconocido" (clienteId null). */
-  async function abrirVehiculoModal(clienteId) {
+  async function abrirVehiculoModal(clienteId, patente) {
     /* Lista de clientes existentes desde la API (modo "existente") */
     try { await traerClientes(); } catch (e) { /* toast ya avisado; el select queda vacío */ }
     var c = clientePorId(clienteId);
@@ -1140,6 +1158,8 @@
 
     $('#vehForm').reset();   /* los radios vuelven a "Cliente existente" */
     $('#v-anio').value = new Date().getFullYear();
+    /* Patente buscada/escaneada que motivó el alta: vuelve tras el reset */
+    if (patente) $('#v-patente').value = norm(patente);
     if (c) sel.value = c.id;
 
     $('#veh-sub').textContent = c
@@ -1328,8 +1348,10 @@
   /* ==========================================================
      12. Clientes (alta)
      ========================================================== */
-  function abrirClienteModal() {
+  function abrirClienteModal(dni) {
     $('#clForm').reset();
+    /* DNI buscado sin resultados: el alta sale con el número ya cargado */
+    if (dni) $('#c-dni').value = norm(dni);
     abrirModal('#modal-cliente');
   }
 
@@ -2150,7 +2172,11 @@ function iniciarCamara() {
     'guardar-ot': function (el) { guardarOT(el); },
     /* Editar una orden del historial: abre el mismo modal precargado */
     'editar-ot': function (el) { cerrarMenuNuevo(); abrirEdicionOT(el.dataset.id); },
-    'nuevo-vehiculo': function (el) { abrirVehiculoModal(el.dataset.cliente); },
+    /* Alta de vehículo: desde la ficha (data-cliente) o desde la pantalla
+       de sin resultados del buscador/escáner (data-patente: la consulta
+       que no arrojó coincidencia, precargada para no perderla). */
+    'nuevo-vehiculo': function (el) { abrirVehiculoModal(el.dataset.cliente || null, el.dataset.patente || null); },
+    'nuevo-cliente': function (el) { abrirClienteModal(el.dataset.dni || null); },
     'guardar-vehiculo': function (el) { guardarVehiculo(el); },
     transferir: function (el) { abrirTransfer(el.dataset.vehiculo, el.dataset.sinTitular === '1'); },
     'guardar-transfer': function (el) { guardarTransfer(el); },
