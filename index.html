@@ -21,10 +21,12 @@
 <body>
 
 <!-- ============================================================
-     VISTA RAÍZ 1 · LOGIN
-     Pantalla de bienvenida + teléfono + OTP. No es un overlay:
-     es una vista raíz que conmuta con .activa desde app.js.
-     Sin token es la única visible; al verificar entra la app.
+     VISTA RAÍZ 1 · LOGIN (dual + registro + recuperación)
+     Tres pestañas: Ingresar (email+contraseña o WhatsApp OTP),
+     Registrarse (Email+Contraseña | OTP+Contraseña) y Restablecer
+     (por OTP o por token de email). No es un overlay: es una vista
+     raíz que conmuta con .activa desde app.js; la vista app recibe
+     .activa cuando la sesión es válida.
      ============================================================ -->
 <section class="vista-raiz" id="vista-login" aria-labelledby="login-title">
   <div class="card login-card">
@@ -34,27 +36,137 @@
       </svg>
     </div>
     <h2 id="login-title">Historia Clínica Vehicular</h2>
-    <p class="muted small">Acceso del taller: te verificamos por WhatsApp con un código de 6 dígitos.</p>
+    <p class="muted small">Acceso del taller: ingresá con tu email, o con tu WhatsApp mediante un código de 6 dígitos.</p>
 
-    <div id="login-paso1">
-      <label class="lb" for="login-tel">Número de WhatsApp</label>
-      <input class="inp mono" id="login-tel" inputmode="tel" autocomplete="tel" placeholder="5491112345678">
-      <button class="btn primary full mt10" id="login-enviar" data-act="login-enviar">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
-        Enviar código por WhatsApp
-      </button>
+    <!-- Pestañas [Ingresar] / [Registrarse] -->
+    <div class="login-tabs" role="tablist" aria-label="Acceso del taller">
+      <button type="button" class="login-tab active" role="tab" aria-selected="true"
+              data-act="login-tab" data-tab="ingresar" id="tab-ingresar">Ingresar</button>
+      <button type="button" class="login-tab" role="tab" aria-selected="false"
+              data-act="login-tab" data-tab="registrarse" id="tab-registrarse">Registrarse</button>
     </div>
 
-    <div id="login-paso2" hidden>
-      <label class="lb" for="login-otp">Código de 6 dígitos</label>
-      <input class="inp mono otp-inp" id="login-otp" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="······">
-      <label class="lb mt10" for="login-taller">Nombre de tu taller <span class="muted small">(si ingresas por primera vez)</span></label>
-      <input class="inp" id="login-taller" maxlength="120" placeholder="Taller Central" autocomplete="organization">
-      <button class="btn primary full mt10" id="login-verificar" data-act="login-verificar">Verificar e Ingresar</button>
-      <button class="btn ghost full mt6" type="button" data-act="login-cambiar-numero">Cambiar el número</button>
+    <!-- PANEL INGRESAR: dual (email+contraseña | WhatsApp OTP) -->
+    <div id="login-panel-ingresar" class="login-panel" role="tabpanel" aria-label="Ingresar">
+      <!-- Camino A: email + contraseña -->
+      <div id="login-paso-email">
+        <label class="lb" for="login-email">Email</label>
+        <input class="inp" id="login-email" type="email" autocomplete="email" placeholder="taller@correo.com">
+        <label class="lb mt10" for="login-clave">Contraseña</label>
+        <input class="inp" id="login-clave" type="password" autocomplete="current-password" placeholder="••••••••">
+        <button class="btn primary full mt10" id="login-boton-pass" data-act="login-pass">Ingresar</button>
+        <button class="btn ghost full mt6" type="button" data-act="login-por-otp">Ingresar con WhatsApp (OTP)</button>
+      </div>
+
+      <!-- Camino B: WhatsApp + OTP (dos pasos, Fase 1) -->
+      <div id="login-paso1" hidden>
+        <label class="lb" for="login-tel">Número de WhatsApp</label>
+        <input class="inp mono" id="login-tel" inputmode="tel" autocomplete="tel" placeholder="5491112345678">
+        <button class="btn primary full mt10" id="login-enviar" data-act="login-enviar">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
+          Enviar código por WhatsApp
+        </button>
+        <button class="btn ghost full mt6" type="button" data-act="login-por-email">Ingresar con email</button>
+      </div>
+
+      <!-- Paso OTP (login por WhatsApp o cierre de registro por OTP) -->
+      <div id="login-paso2" hidden>
+        <label class="lb" for="login-otp">Código de 6 dígitos</label>
+        <input class="inp mono otp-inp" id="login-otp" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="······">
+        <div id="login-fila-taller" class="mt10">
+          <label class="lb" for="login-taller">Nombre de tu taller <span class="muted small">(si ingresas por primera vez)</span></label>
+          <input class="inp" id="login-taller" maxlength="120" placeholder="Taller Central" autocomplete="organization">
+        </div>
+        <button class="btn primary full mt10" id="login-verificar" data-act="login-verificar">Verificar e Ingresar</button>
+        <button class="btn ghost full mt6" type="button" data-act="login-cambiar-numero">Cambiar el número</button>
+      </div>
+
+      <!-- Enlace SIEMPRE visible debajo de los campos -->
+      <button type="button" class="login-link mt10" data-act="login-olvide">¿Olvidaste tu contraseña?</button>
     </div>
 
-    <div class="muted small mt10" id="login-estado"></div>
+    <!-- PANEL REGISTRARSE: Email+Contraseña | WhatsApp (OTP)+Contraseña -->
+    <div id="login-panel-registrarse" class="login-panel" role="tabpanel" aria-label="Registrarse" hidden>
+      <div class="reg-modos" role="radiogroup" aria-label="Método de registro">
+        <label class="modo-op" for="reg-modo-email">
+          <input type="radio" name="reg-modo" id="reg-modo-email" value="email" checked>
+          <span>Email + Contraseña</span>
+        </label>
+        <label class="modo-op" for="reg-modo-tel">
+          <input type="radio" name="reg-modo" id="reg-modo-tel" value="telefono">
+          <span>WhatsApp (OTP) + Contraseña</span>
+        </label>
+      </div>
+
+      <div class="mt10">
+        <label class="lb" for="reg-taller">Nombre de tu taller</label>
+        <input class="inp" id="reg-taller" maxlength="120" placeholder="Taller Central" autocomplete="organization">
+      </div>
+
+      <div id="reg-campo-email" class="mt10">
+        <label class="lb" for="reg-email">Email</label>
+        <input class="inp" id="reg-email" type="email" autocomplete="email" placeholder="taller@correo.com">
+      </div>
+
+      <div id="reg-campo-telefono" class="mt10" hidden>
+        <label class="lb" for="reg-tel">Número de WhatsApp</label>
+        <input class="inp mono" id="reg-tel" inputmode="tel" autocomplete="tel" placeholder="5491112345678">
+      </div>
+
+      <div class="mt10">
+        <label class="lb" for="reg-clave">Contraseña <span class="muted small">(mínimo 8)</span></label>
+        <input class="inp" id="reg-clave" type="password" autocomplete="new-password" placeholder="••••••••">
+      </div>
+
+      <button class="btn primary full mt10" id="reg-crear" data-act="registrar">Crear cuenta</button>
+      <button class="btn ghost full mt6" type="button" data-act="login-tab-volver">Ya tengo cuenta: Ingresar</button>
+    </div>
+
+    <!-- PANEL RESTABLECER: via OTP al WhatsApp | via token al email -->
+    <div id="login-panel-reset" class="login-panel" role="tabpanel" aria-label="Restablecer contraseña" hidden>
+      <p class="muted small">Restablecé tu contraseña con un código OTP a tu WhatsApp (2 por mes) o con un token que llega a tu email.</p>
+
+      <div class="reg-modos" role="radiogroup" aria-label="Método de restablecimiento">
+        <label class="modo-op" for="reset-modo-otp">
+          <input type="radio" name="reset-modo" id="reset-modo-otp" value="otp" checked>
+          <span>Código OTP (WhatsApp)</span>
+        </label>
+        <label class="modo-op" for="reset-modo-token">
+          <input type="radio" name="reset-modo" id="reset-modo-token" value="token">
+          <span>Token por email</span>
+        </label>
+      </div>
+
+      <div id="reset-campos-otp" class="mt10">
+        <label class="lb" for="reset-tel">Número de WhatsApp</label>
+        <input class="inp mono" id="reset-tel" inputmode="tel" placeholder="5491112345678">
+        <button class="btn full mt10" id="reset-otp-enviar" data-act="reset-otp-enviar">Enviar código al WhatsApp</button>
+        <div class="mt10">
+          <label class="lb" for="reset-otp">Código recibido</label>
+          <input class="inp mono otp-inp" id="reset-otp" inputmode="numeric" maxlength="6" placeholder="······">
+          <label class="lb mt10" for="reset-clave-otp">Nueva contraseña <span class="muted small">(mínimo 8)</span></label>
+          <input class="inp" id="reset-clave-otp" type="password" autocomplete="new-password" placeholder="••••••••">
+          <button class="btn primary full mt10" id="reset-confirmar" data-act="reset-confirmar">Restablecer con OTP</button>
+        </div>
+      </div>
+
+      <div id="reset-campos-token" class="mt10" hidden>
+        <label class="lb" for="reset-email">Email de la cuenta</label>
+        <input class="inp" id="reset-email" type="email" autocomplete="email" placeholder="taller@correo.com">
+        <button class="btn full mt10" id="reset-email-enviar" data-act="reset-email-enviar">Enviar token al email</button>
+        <div class="mt10">
+          <label class="lb" for="reset-token">Token recibido</label>
+          <input class="inp mono" id="reset-token" placeholder="Pegá acá el token del email" autocomplete="one-time-code">
+          <label class="lb mt10" for="reset-clave-token">Nueva contraseña <span class="muted small">(mínimo 8)</span></label>
+          <input class="inp" id="reset-clave-token" type="password" autocomplete="new-password" placeholder="••••••••">
+          <button class="btn primary full mt10" id="reset-confirmar-token" data-act="reset-confirmar-token">Restablecer con token</button>
+        </div>
+      </div>
+
+      <button class="btn ghost full mt6" type="button" data-act="login-tab-volver">Volver a Ingresar</button>
+    </div>
+
+    <div class="muted small mt10" id="login-estado" aria-live="polite"></div>
   </div>
 </section>
 
@@ -100,8 +212,12 @@
               <span><b>Nuevo Vehículo</b><small>Con propietario o sin titular</small></span>
             </button>
           </div>
-          <!-- Sesión (autenticación por teléfono + OTP): taller activo y cierre -->
+          <!-- Sesión (login dual): taller activo, perfil y cierre -->
           <span class="sesion-pill" id="sesion-taller"></span>
+          <button class="tb-btn" id="btn-perfil" data-act="perfil" title="Perfil del taller" aria-label="Perfil del taller">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            <span>Perfil</span>
+          </button>
           <button class="tb-btn" id="btn-salir" data-act="logout" title="Cerrar sesión" aria-label="Cerrar sesión">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/></svg>
             <span>Salir</span>
@@ -137,6 +253,12 @@
       </div>
     </div>
   </header>
+
+  <!-- Banner discreto de perfil incompleto: sólo si la cuenta es OTP-only
+       (sin email) — se llena el dato desde #modal-perfil (botón Perfil). -->
+  <div id="banner-perfil" class="banner-alerta" hidden>
+    ⚠️ <span>Completa tu email en tu <button type="button" class="link-btn" data-act="perfil">Perfil</button> para poder recuperar tu cuenta si agotas tus OTP mensuales.</span>
+  </div>
 
   <!-- ================= RESULTADOS ================= -->
   <main>
@@ -388,6 +510,49 @@
       <button class="btn primary" data-act="guardar-cliente">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
         Guardar cliente
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= MODAL: PERFIL DEL TALLER (Fase 2) ================= -->
+<div class="backdrop" id="modal-perfil" role="dialog" aria-modal="true" aria-labelledby="pf-title">
+  <div class="sheet">
+    <div class="grabber"></div>
+    <div class="sheet-hd">
+      <div style="flex:1">
+        <h3 id="pf-title">Perfil del Taller</h3>
+        <div class="sub">Vinculá tu email de recuperación, teléfono y datos del taller</div>
+      </div>
+      <button class="sheet-x" data-act="cerrar-modal" aria-label="Cerrar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <form class="sheet-bd" id="pfForm">
+      <div class="form-grid">
+        <div class="span-2">
+          <label class="lb" for="pf-email">Email de recuperación</label>
+          <input class="inp" id="pf-email" type="email" autocomplete="email" placeholder="taller@correo.com">
+          <div class="muted small mt6">🔑 Sin email la recuperación por token no está disponible y los OTP quedan limitados a 2 por mes.</div>
+        </div>
+        <div>
+          <label class="lb" for="pf-tel">Teléfono (WhatsApp)</label>
+          <input class="inp mono" id="pf-tel" inputmode="tel" placeholder="5491112345678">
+        </div>
+        <div>
+          <label class="lb" for="pf-taller">Nombre del taller</label>
+          <input class="inp" id="pf-taller" maxlength="120" placeholder="Taller Central">
+        </div>
+        <div class="span-2 muted small">
+          Cuenta creada: <span id="pf-creada">—</span> · OTPs usados este mes: <span id="pf-cuota">—</span>
+        </div>
+      </div>
+    </form>
+    <div class="sheet-ft">
+      <button class="btn" data-act="cerrar-modal">Cancelar</button>
+      <button class="btn primary" data-act="guardar-perfil">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+        Guardar perfil
       </button>
     </div>
   </div>

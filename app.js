@@ -2199,10 +2199,24 @@ function iniciarCamara() {
     },
     'menu-nuevo-cliente': function () { cerrarMenuNuevo(); abrirClienteModal(); },
     'menu-nuevo-vehiculo': function () { cerrarMenuNuevo(); abrirVehiculoModal(null); },
-    /* Sesión: login por OTP (dos pasos) y cierre de sesión */
+    /* Sesión (Fase 2): pestañas, login dual, registro, restablecer,
+       perfil y cierre de sesión */
+    'login-tab': function (el) { mostrarPanelLogin(el.dataset.tab || 'ingresar'); },
+    'login-tab-volver': function () { mostrarPanelLogin('ingresar'); },
+    'login-pass': function (el) { loginCorreo(el); },
+    'login-por-otp': function () { verPasoIngresar('tel'); },
+    'login-por-email': function () { verPasoIngresar('email'); },
+    'login-olvide': function () { mostrarPanelLogin('reset'); },
     'login-enviar': function (el) { loginEnviar(el); },
     'login-verificar': function (el) { loginVerificar(el); },
     'login-cambiar-numero': function () { volverPaso1(); },
+    registrar: function (el) { registrar(el); },
+    'reset-otp-enviar': function (el) { resetEnviarOtp(el); },
+    'reset-confirmar': function (el) { resetConfirmarOtp(el); },
+    'reset-email-enviar': function (el) { resetEnviarEmail(el); },
+    'reset-confirmar-token': function (el) { resetConfirmarToken(el); },
+    perfil: function () { abrirPerfil(); },
+    'guardar-perfil': function (el) { guardarPerfil(el); },
     logout: function () { cerrarSesion(); },
     scan: function () { abrirEscaner(); },
     capturar: function () { capturarYLeer(); },
@@ -2336,6 +2350,49 @@ function iniciarCamara() {
   $('#login-taller').addEventListener('keydown', function (ev) {
     if (ev.key === 'Enter') { ev.preventDefault(); ACCIONES['login-verificar']($('#login-verificar')); }
   });
+  /* Enter en el login por email: dispara el mismo botón Ingresar */
+  ['#login-email', '#login-clave'].forEach(function (sel) {
+    $(sel).addEventListener('keydown', function (ev) {
+      if (ev.key === 'Enter') { ev.preventDefault(); ACCIONES['login-pass']($('#login-boton-pass')); }
+    });
+  });
+  /* Enter en el registro y en el restablecimiento */
+  ['#reg-tel', '#reg-clave'].forEach(function (sel) {
+    $(sel).addEventListener('keydown', function (ev) {
+      if (ev.key === 'Enter') { ev.preventDefault(); ACCIONES['registrar']($('#reg-crear')); }
+    });
+  });
+  ['#reset-otp', '#reset-clave-otp'].forEach(function (sel) {
+    $(sel).addEventListener('keydown', function (ev) {
+      if (ev.key === 'Enter') { ev.preventDefault(); ACCIONES['reset-confirmar']($('#reset-confirmar')); }
+    });
+  });
+  $('#reset-tel').addEventListener('keydown', function (ev) {
+    if (ev.key === 'Enter') { ev.preventDefault(); ACCIONES['reset-otp-enviar']($('#reset-otp-enviar')); }
+  });
+  $('#reset-email').addEventListener('keydown', function (ev) {
+    if (ev.key === 'Enter') { ev.preventDefault(); ACCIONES['reset-email-enviar']($('#reset-email-enviar')); }
+  });
+  ['#reset-token', '#reset-clave-token'].forEach(function (sel) {
+    $(sel).addEventListener('keydown', function (ev) {
+      if (ev.key === 'Enter') { ev.preventDefault(); ACCIONES['reset-confirmar-token']($('#reset-confirmar-token')); }
+    });
+  });
+
+  /* Radios del registro (Email ↔ WhatsApp) y del restablecimiento
+     (OTP ↔ token de email): conmutan los campos visibles */
+  $$('input[name="reg-modo"]').forEach(function (r) {
+    r.addEventListener('change', function () {
+      var checked = document.querySelector('input[name="reg-modo"]:checked');
+      if (checked) toggleModoRegistro(checked.value);
+    });
+  });
+  $$('input[name="reset-modo"]').forEach(function (r) {
+    r.addEventListener('change', function () {
+      var checked = document.querySelector('input[name="reset-modo"]:checked');
+      if (checked) elegirResetMetodo(checked.value);
+    });
+  });
 
   /* Switch "Propietario desconocido" vs. datos del nuevo titular */
   $('#tr-sin-titular').addEventListener('change', alternarDatosTitular);
@@ -2365,13 +2422,56 @@ function iniciarCamara() {
   });
 
   /* ==========================================================
-     21. Sesión y login (autenticación por teléfono + OTP, Fase 1)
-     La vista de login cubre la app hasta verificar el código. El
-     OTP viaja por WhatsApp (Fase 1: mock — códigos en la consola
-     del servidor; con NODE_ENV=development la API además los
-     devuelve en la respuesta para probar sin celular).
+     21. Sesión, login dual y perfil (Fase 2 de autenticación)
+     Pantalla de bienvenida con pestañas [Ingresar] / [Registrarse]:
+     · Ingreso por email + contraseña (contador de intentos; a los 3
+       la vista salta sola a restablecer contraseña).
+     · Ingreso por WhatsApp + OTP (dos pasos, Fase 1, sigue vivo).
+     · Registro: Email+Contraseña o WhatsApp(OTP)+Contraseña.
+     · Recuperación: OTP al WhatsApp (si la cuota mensual lo permite)
+       o token al email (mock: consola del server).
+     · Modal Perfil: vincular email/teléfono; banner si la cuenta es
+       OTP-only (sin email no hay recuperación por token).
      ========================================================== */
-  var telefonoLogin = '';
+  var telefonoLogin = '';        /* teléfono en juego entre paso 1 y paso 2 */
+  var registroPorOtp = false;    /* el paso 2 cierra un REGISTRO (no un ingreso) */
+  var claveRegistro = '';        /* contraseña del registro por OTP (paso 2) */
+
+  /* ---------------------------------------------------------------
+     apiCrudo: fetch del endpoint tal cual devuelve { status, cuerpo }
+     SIN toasts ni excepciones — para pantallas de login/registro que
+     pintan el mensaje del servidor EN LÍNEA (contador de intentos,
+     cuota 429, forceReset 403). apiFetch sigue siendo el camino feliz
+     del resto de la app.
+     --------------------------------------------------------------- */
+  async function apiCrudo(endpoint, options) {
+    var opts = options || {};
+    var init = {
+      method: opts.method || 'GET',
+      headers: { 'Content-Type': 'application/json' },
+      cache: 'no-store'
+    };
+    var token = tokenSesion();
+    if (token) init.headers.Authorization = 'Bearer ' + token;
+    if (opts.body !== undefined) init.body = JSON.stringify(opts.body);
+    try {
+      var respuesta = await fetch(API_BASE + endpoint, init);
+      var texto = await respuesta.text();
+      var cuerpo = null;
+      try { cuerpo = texto ? JSON.parse(texto) : null; } catch (e) { cuerpo = null; }
+      return { status: respuesta.status, cuerpo: cuerpo };
+    } catch (e) {
+      var msgRed = 'No hay conexión con la API (' + API_BASE + '). ¿Está levantado el servidor?';
+      return { status: 0, cuerpo: { error: { mensaje: msgRed } } };
+    }
+  }
+
+  function setEstado(mensaje, esError) {
+    var est = $('#login-estado');
+    if (!est) return;
+    est.textContent = mensaje || '';
+    est.classList.toggle('err', !!esError);
+  }
 
   /* Vista raíz LOGIN: única visible hasta verificar el OTP. La
      conmutación es por clase .activa entre #vista-login y
@@ -2381,13 +2481,26 @@ function iniciarCamara() {
     var app = $('#vista-app');
     if (login) login.classList.add('activa');
     if (app) app.classList.remove('activa');
-    $('#login-paso1').hidden = false;
-    $('#login-paso2').hidden = true;
-    $('#login-tel').value = '';
-    $('#login-otp').value = '';
-    $('#login-taller').value = '';
-    $('#login-estado').textContent = mensajeEstado || '';
-    var tel = $('#login-tel');
+    registroPorOtp = false;
+    claveRegistro = '';
+    mostrarPanelLogin('ingresar', null);
+    /* Logout / vencimiento: formularios limpios (también los otros paneles,
+       para que nada quede precargado entre sesiones de la misma máquina) */
+    ['login-email', 'login-clave', 'login-tel', 'login-otp', 'login-taller',
+     'reg-taller', 'reg-email', 'reg-tel', 'reg-clave',
+     'reset-tel', 'reset-otp', 'reset-clave-otp',
+     'reset-email', 'reset-token', 'reset-clave-token'].forEach(function (id) {
+      var campo = $('#' + id);
+      if (campo) campo.value = '';
+    });
+    var rEmail = $('#reg-modo-email');
+    if (rEmail) rEmail.checked = true;
+    toggleModoRegistro('email');
+    var rOtpReset = $('#reset-modo-otp');
+    if (rOtpReset) rOtpReset.checked = true;
+    elegirResetMetodo('otp');
+    setEstado(mensajeEstado || '');
+    var tel = $('#login-email') || $('#login-tel');
     if (tel) tel.focus();
   }
 
@@ -2398,14 +2511,123 @@ function iniciarCamara() {
     if (app) app.classList.add('activa');
     if (login) login.classList.remove('activa');
   }
-  /* Topbar: nombre del taller logueado (vacío si no hay sesión) */
+
+  /* Topbar: nombre del taller logueado + banner de perfil incompleto
+     (cuentas OTP-only: sin email la recuperación por token no existe) */
   function mostrarSesionUI() {
     var u = usuarioSesion();
     var pill = $('#sesion-taller');
     if (pill) pill.textContent = u && u.nombreTaller ? u.nombreTaller : '';
+    var banner = $('#banner-perfil');
+    if (banner) banner.hidden = !(u && !u.email);
   }
 
-  /* Paso 1 → pedir código. ConEnvio desactiva el botón mientras corre. */
+  /* ---------------------------------------------------------------
+     Pestañas del login: [Ingresar] / [Registrarse] / [Restablecer
+     contraseña] (panel de recuperación: lo abren el enlace
+     "¿Olvidaste tu contraseña?" y el bloqueo por intentos). Cada
+     panel se muestra/oculta por hidden.
+     --------------------------------------------------------------- */
+  function mostrarPanelLogin(panel, mensajeEstado) {
+    $$('.login-tab').forEach(function (t) {
+      var on = t.dataset.tab === panel;
+      t.classList.toggle('active', on);
+      t.setAttribute('aria-selected', on);
+    });
+    var pIngresar = $('#login-panel-ingresar');
+    var pRegistrar = $('#login-panel-registrarse');
+    var pReset = $('#login-panel-reset');
+    if (pIngresar) pIngresar.hidden = panel !== 'ingresar';
+    if (pRegistrar) pRegistrar.hidden = panel !== 'registrarse';
+    if (pReset) pReset.hidden = panel !== 'reset';
+    /* El panel Ingresar siempre arranca de cero (camino email) */
+    if (panel === 'ingresar') verPasoIngresar('email');
+    setEstado(mensajeEstado || '');
+    var foco = panel === 'ingresar' ? $('#login-email')
+             : panel === 'registrarse' ? $('#reg-taller')
+             : $('#reset-tel');
+    if (foco) foco.focus();
+  }
+
+  /* Alternar caminos dentro de Ingresar: email+contraseña ↔ WhatsApp OTP */
+  function verPasoIngresar(cual) {
+    var pe = $('#login-paso-email');
+    var p1 = $('#login-paso1');
+    var p2 = $('#login-paso2');
+    if (pe) pe.hidden = cual !== 'email';
+    if (p1) p1.hidden = cual === 'email';
+    if (p2) p2.hidden = true;
+    var foco = cual === 'email' ? $('#login-email') : $('#login-tel');
+    if (foco) foco.focus();
+  }
+
+  /* Radios del registro: cambia los campos email ↔ teléfono */
+  function toggleModoRegistro(modo) {
+    var esEmail = modo !== 'telefono';
+    var ce = $('#reg-campo-email');
+    var ct = $('#reg-campo-telefono');
+    if (ce) ce.hidden = !esEmail;
+    if (ct) ct.hidden = esEmail;
+  }
+
+  /* Radios del reset: OTP al WhatsApp ↔ token al email */
+  function elegirResetMetodo(modo) {
+    var rO = $('#reset-modo-otp'), rT = $('#reset-modo-token');
+    if (rO) rO.checked = modo === 'otp';
+    if (rT) rT.checked = modo === 'token';
+    var co = $('#reset-campos-otp');
+    var ct = $('#reset-campos-token');
+    if (co) co.hidden = modo !== 'otp';
+    if (ct) ct.hidden = modo !== 'token';
+  }
+
+  /* ------------------------------------------------------------------
+     INGRESO email + contraseña (login con contador de intentos)
+     El cuerpo del error viaja EN LÍNEA a #login-estado: "Credenciales
+     incorrectas. Intentos restantes: 2". Con forceReset (3ª falla) la
+     vista conmuta ella sola a Restablecer (por email si hay uno
+     precargado; el modo OTP queda para la cuenta que tiene solo tel).
+     ------------------------------------------------------------------ */
+  async function loginCorreo(btn) {
+    var email = String($('#login-email').value || '').trim();
+    var clave = String($('#login-clave').value || '');
+    if (!email || !clave) { setEstado('Completá email y contraseña', true); return; }
+    await conEnvio(btn, async function () {
+      var r = await apiCrudo('/auth/login', {
+        method: 'POST', body: { email: email, password: clave }
+      });
+
+      if (r.status === 200 && r.cuerpo && r.cuerpo.token) {
+        guardarSesion(r.cuerpo.token, r.cuerpo.usuario || null);
+        mostrarSesionUI();
+        mostrarApp();
+        console.info('[auth] Token guardado y sesión iniciada');
+        var nombre = r.cuerpo.usuario && r.cuerpo.usuario.nombreTaller;
+        toast('Ingresaste al taller' + (nombre ? ' — ' + nombre : ''));
+        arrancarDatos();
+        return;
+      }
+
+      /* 3ª contraseña errónea: bloqueo → conmutación automática a reset */
+      if (r.status === 403 && r.cuerpo && r.cuerpo.forceReset) {
+        var msj = r.cuerpo.error && r.cuerpo.error.mensaje
+          ? r.cuerpo.error.mensaje
+          : 'Demasiados intentos fallidos. Debes restablecer tu contraseña.';
+        mostrarPanelLogin('reset', msj);
+        /* Con el email que ya había escrito es natural hacer el reseteo
+           vía token al email; el modo OTP queda a mano en los radios. */
+        var campoEmail = $('#reset-email');
+        if (campoEmail && email) campoEmail.value = email;
+        elegirResetMetodo(email ? 'token' : 'otp');
+        return;
+      }
+
+      var msg = (r.cuerpo && r.cuerpo.error && r.cuerpo.error.mensaje) || ('Error HTTP ' + r.status);
+      setEstado(msg, true);
+    });
+  }
+
+  /* Paso 1 (WhatsApp OTP) → pedir código. ConEnvio desactiva el botón. */
   async function loginEnviar(btn) {
     var tel = String($('#login-tel').value || '').replace(/[^\d+]/g, '');
     if (tel.length < 8 || tel.length > 15) {
@@ -2413,35 +2635,44 @@ function iniciarCamara() {
       return;
     }
     telefonoLogin = tel;
-    var est = $('#login-estado');
     var ok = await conEnvio(btn, async function () {
-      var r = await api('/auth/request-otp', { method: 'POST', body: { telefono: tel } });
-      if (r && r.dev && r.dev.otp) {
-        /* Sólo aparece con el backend en NODE_ENV=development (mock) */
-        est.textContent = 'Código ' + r.dev.otp + ' — (visible sólo porque el backend está en desarrollo)';
-      } else {
-        est.textContent = 'Código enviado: revisá tu chat de WhatsApp.';
+      var r = await apiCrudo('/auth/request-otp', { method: 'POST', body: { telefono: tel } });
+      if (r.status === 200) {
+        setEstado(r.cuerpo && r.cuerpo.dev && r.cuerpo.dev.otp
+          ? 'Código ' + r.cuerpo.dev.otp + ' — (visible sólo porque el backend está en desarrollo)'
+          : 'Código enviado: revisá tu chat de WhatsApp.');
+        return;
       }
+      /* Cuota mensual agotada y demás 429/400: mensaje del server en línea */
+      var msg = (r.cuerpo && r.cuerpo.error && r.cuerpo.error.mensaje) || ('Error HTTP ' + r.status);
+      setEstado(msg, true);
+      throw new Error(msg);
     });
-    if (!ok) return;               /* el toast del error ya avisó */
+    if (!ok) return;               /* el estado en línea ya avisó */
     $('#login-paso1').hidden = true;
     $('#login-paso2').hidden = false;
+    $('#login-fila-taller').hidden = registroPorOtp;
     $('#login-otp').focus();
   }
 
-  /* Paso 2 → verificar: guarda token+usuario y hace arrancar la app */
+  /* Paso 2 → verificar OTP: sirve para INGRESAR por WhatsApp y para CERRAR
+     el registro por teléfono (con la contraseña elegida en Registrarse). */
   async function loginVerificar(btn) {
     var otp = String($('#login-otp').value || '').replace(/\D/g, '');
     if (otp.length !== 6) { toast('Ingresá el código de 6 dígitos', true); return; }
-    var nombreTaller = String($('#login-taller').value || '').trim();
+    var nombreTaller = registroPorOtp
+      ? String($('#reg-taller').value || '').trim()
+      : String($('#login-taller').value || '').trim();
+    var cuerpo = { telefono: telefonoLogin, otp: otp, nombreTaller: nombreTaller };
+    if (registroPorOtp && claveRegistro) cuerpo.password = claveRegistro;
+
     var verificado = null;
     var ok = await conEnvio(btn, async function () {
-      verificado = await api('/auth/verify-otp', {
-        method: 'POST',
-        body: { telefono: telefonoLogin, otp: otp, nombreTaller: nombreTaller }
-      });
+      verificado = await api('/auth/verify-otp', { method: 'POST', body: cuerpo });
     });
     if (!ok || !verificado || !verificado.token) return;
+    registroPorOtp = false;
+    claveRegistro = '';
     guardarSesion(verificado.token, verificado.usuario || null);
     mostrarSesionUI();
     mostrarApp();
@@ -2454,9 +2685,213 @@ function iniciarCamara() {
   function volverPaso1() {
     $('#login-paso1').hidden = false;
     $('#login-paso2').hidden = true;
-    $('#login-estado').textContent = '';
+    $('#login-fila-taller').hidden = false;
+    setEstado('');
     $('#login-tel').focus();
   }
+
+  /* ------------------------------------------------------------------
+     REGISTRO dual: { metodo:'email' } alta inmediata + auto-sesión;
+     { metodo:'telefono' } prueba de propiedad con OTP (el paso 2 del
+     panel Ingresar hace la verificación con claveRegistro).
+     ------------------------------------------------------------------ */
+  async function registrar(btn) {
+    var radio = document.querySelector('input[name="reg-modo"]:checked');
+    var modo = radio ? radio.value : 'email';
+    var taller = String($('#reg-taller').value || '').trim();
+    var clave = String($('#reg-clave').value || '');
+
+    if (clave.length < 8) { setEstado('La contraseña debe tener al menos 8 caracteres', true); return; }
+
+    if (modo === 'email') {
+      var email = String($('#reg-email').value || '').trim();
+      if (!email) { setEstado('Ingresá el email de la cuenta', true); return; }
+      var creado = null;
+      var fin = await conEnvio(btn, async function () {
+        creado = await api('/auth/register', {
+          method: 'POST',
+          body: { metodo: 'email', email: email, password: clave, nombreTaller: taller }
+        });
+      });
+      if (!fin || !creado || !creado.token) return;   /* el toast ya avisó */
+      registroPorOtp = false;
+      claveRegistro = '';
+      guardarSesion(creado.token, creado.usuario || null);
+      mostrarSesionUI();
+      mostrarApp();
+      console.info('[auth] Token guardado y sesión iniciada');
+      var nombre = creado.usuario && creado.usuario.nombreTaller;
+      toast('Cuenta creada' + (nombre ? ' — ' + nombre : '') + ': ingresaste al taller');
+      arrancarDatos();
+      return;
+    }
+
+    /* Registro por teléfono: primero el código (propiedad), luego el paso 2 */
+    var tel = String($('#reg-tel').value || '').replace(/[^\d+]/g, '');
+    if (tel.length < 8 || tel.length > 15) {
+      setEstado('Número inválido: usá el formato internacional, p.ej. 5491112345678', true);
+      return;
+    }
+    var resp = null;
+    fin = await conEnvio(btn, async function () {
+      resp = await api('/auth/register', {
+        method: 'POST',
+        body: { metodo: 'telefono', telefono: tel, password: clave, nombreTaller: taller }
+      });
+    });
+    if (!fin || !resp || !resp.necesitaVerificacion) return;
+    registroPorOtp = true;
+    claveRegistro = clave;
+    telefonoLogin = tel;
+    mostrarPanelLogin('ingresar');            /* el OTP se cierra en su paso 2 */
+    $('#login-paso1').hidden = true;
+    $('#login-paso2').hidden = false;
+    $('#login-fila-taller').hidden = true;    /* el taller ya lo escribió acá */
+    setEstado(resp.dev && resp.dev.otp
+      ? 'Código ' + resp.dev.otp + ' — (visible sólo porque el backend está en desarrollo)'
+      : 'Código enviado: revisá tu chat de WhatsApp (' + tel + ')');
+    $('#login-otp').focus();
+  }
+
+  /* ------------------------------------------------------------------
+     RESTABLECER contraseña: por OTP al WhatsApp (si la cuota del mes lo
+     permite) o por token enviado al email (mock → consola del server;
+     en desarrollo el token arriba también como dato en línea).
+     ------------------------------------------------------------------ */
+  async function resetEnviarOtp(btn) {
+    var tel = String($('#reset-tel').value || '').replace(/[^\d+]/g, '');
+    if (tel.length < 8 || tel.length > 15) {
+      setEstado('Número inválido: usá el formato internacional, p.ej. 5491112345678', true);
+      return;
+    }
+    var r = null;
+    await conEnvio(btn, async function () {
+      r = await apiCrudo('/auth/request-otp', { method: 'POST', body: { telefono: tel } });
+      if (r.status === 200) {
+        setEstado(r.cuerpo && r.cuerpo.dev && r.cuerpo.dev.otp
+          ? 'Código ' + r.cuerpo.dev.otp + ' — (visible sólo porque el backend está en desarrollo)'
+          : 'Código enviado: revisá tu chat de WhatsApp.');
+        return;
+      }
+      var msg = (r.cuerpo && r.cuerpo.error && r.cuerpo.error.mensaje) || ('Error HTTP ' + r.status);
+      setEstado(msg, true);
+      /* 429 por cuota con email registrado: la salida natural es el token */
+      if (r.status === 429 && /email/i.test(msg)) {
+        var campo = $('#reset-email');
+        var u = usuarioSesion();
+        if (campo && u && u.email) campo.value = u.email;
+        elegirResetMetodo('token');
+      }
+    });
+  }
+
+  async function resetConfirmarOtp(btn) {
+    var tel = String($('#reset-tel').value || '').replace(/[^\d+]/g, '');
+    var otp = String($('#reset-otp').value || '').replace(/\D/g, '');
+    var clave = String($('#reset-clave-otp').value || '');
+    if (otp.length !== 6) { setEstado('Ingresá el código de 6 dígitos', true); return; }
+    if (clave.length < 8) { setEstado('La nueva contraseña debe tener al menos 8 caracteres', true); return; }
+    var r = null;
+    await conEnvio(btn, async function () {
+      r = await apiCrudo('/auth/reset-password', {
+        method: 'POST',
+        body: { via: 'otp', telefono: tel, otp: otp, password: clave }
+      });
+      if (r.status === 200) {
+        mostrarPanelLogin('ingresar', 'Contraseña restablecida: ingresá con tu nueva contraseña.');
+        return;
+      }
+      setEstado((r.cuerpo && r.cuerpo.error && r.cuerpo.error.mensaje) || ('Error HTTP ' + r.status), true);
+    });
+  }
+
+  async function resetEnviarEmail(btn) {
+    var email = String($('#reset-email').value || '').trim();
+    if (!email) { setEstado('Ingresá el email de la cuenta', true); return; }
+    var r = null;
+    await conEnvio(btn, async function () {
+      r = await apiCrudo('/auth/olvide-password', { method: 'POST', body: { email: email } });
+      if (r.status === 200) {
+        var msg = r.cuerpo && r.cuerpo.mensaje ? r.cuerpo.mensaje : 'Token enviado (si el email está registrado).';
+        /* Mock de desarrollo: el token llega por consola del server — y acá */
+        if (r.cuerpo && r.cuerpo.dev && r.cuerpo.dev.token) {
+          msg += ' Token: ' + r.cuerpo.dev.token;
+        }
+        setEstado(msg);
+        return;
+      }
+      setEstado((r.cuerpo && r.cuerpo.error && r.cuerpo.error.mensaje) || ('Error HTTP ' + r.status), true);
+    });
+  }
+
+  async function resetConfirmarToken(btn) {
+    var token = String($('#reset-token').value || '').trim();
+    var clave = String($('#reset-clave-token').value || '');
+    if (!token) { setEstado('Pegá el token que llegó al email', true); return; }
+    if (clave.length < 8) { setEstado('La nueva contraseña debe tener al menos 8 caracteres', true); return; }
+    var r = null;
+    await conEnvio(btn, async function () {
+      r = await apiCrudo('/auth/reset-password', {
+        method: 'POST',
+        body: { via: 'token', token: token, password: clave }
+      });
+      if (r.status === 200) {
+        mostrarPanelLogin('ingresar', 'Contraseña restablecida: ingresá con tu nueva contraseña.');
+        return;
+      }
+      setEstado((r.cuerpo && r.cuerpo.error && r.cuerpo.error.mensaje) || ('Error HTTP ' + r.status), true);
+    });
+  }
+
+  /* ------------------------------------------------------------------
+     PERFIL (modal dentro de la app): precarga desde taller_usuario y
+     datos frescos del server. Guardar → PUT /auth/profile; si cambia
+     el teléfono la API re-firma el token y se reemplaza.
+     ------------------------------------------------------------------ */
+  async function abrirPerfil() {
+    var u = usuarioSesion() || {};
+    $('#pf-email').value = u.email || '';
+    $('#pf-tel').value = u.telefono || '';
+    $('#pf-taller').value = u.nombreTaller || '';
+    $('#pf-creada').textContent = u.createdAt ? String(u.createdAt).slice(0, 10) : '—';
+    $('#pf-cuota').textContent = u.cuotaOtp ? (u.cuotaOtp.usados + '/' + u.cuotaOtp.limite) : '—';
+    abrirModal('#modal-perfil');
+    try {
+      var fresco = await api('/auth/profile');
+      if (fresco && fresco.usuario) {
+        var v = fresco.usuario;
+        $('#pf-email').value = v.email || '';
+        $('#pf-tel').value = v.telefono || '';
+        $('#pf-taller').value = v.nombreTaller || '';
+        $('#pf-creada').textContent = v.createdAt ? String(v.createdAt).slice(0, 10) : '—';
+        $('#pf-cuota').textContent = v.cuotaOtp ? (v.cuotaOtp.usados + '/' + v.cuotaOtp.limite) : '—';
+        /* Datos frescos al localStorage: el banner y la pill no se atrasan */
+        guardarSesion(tokenSesion(), v);
+        mostrarSesionUI();
+      }
+    } catch (e) { /* 401/Red: ya se notificó; el modal queda editable */ }
+  }
+
+  async function guardarPerfil(btn) {
+    var datos = {};
+    var email = String($('#pf-email').value || '').trim();
+    var tel = String($('#pf-tel').value || '').replace(/[^\d+]/g, '');
+    var taller = String($('#pf-taller').value || '').trim();
+    if (email) datos.email = email;
+    if (tel) datos.telefono = tel;
+    if (taller) datos.nombreTaller = taller;
+    if (!Object.keys(datos).length) { toast('No hay cambios: completá algún dato'); return; }
+
+    var fin = await conEnvio(btn, async function () {
+      var r = await api('/auth/profile', { method: 'PUT', body: datos });
+      guardarSesion(r && r.token ? r.token : tokenSesion(), (r && r.usuario) || usuarioSesion());
+    });
+    if (!fin) return;
+    cerrarModal();
+    mostrarSesionUI();
+    toast('Perfil actualizado');
+  }
+
 
   /* Salir: borra token+usuario, resetea navegación y datos en memoria y
      vuelve a la pantalla de login */

@@ -71,11 +71,49 @@ function ejecutarSchema() {
   exec(fs.readFileSync(SCHEMA_PATH, 'utf8'));
 }
 
-/* Aplicación de schema SIEMPRE en el arranque: en base vacía crea TODO; sobre una
-   base previa re-ejecuta el DDL idempotente (CREATE ... IF NOT EXISTS) y añade
-   las tablas nuevas sin perder datos (así la tabla `usuarios` de la Fase 1
-   de auth también aparece en un taller.sqlite creado antes del update). */
+/* ORDEN CRÍTICO: la migración corre ANTES del schema — sobre una base
+   Fase 1 la tabla `usuarios` existe sin las columnas nuevas, y el schema
+   (CREATE UNIQUE INDEX ... ON usuarios (email)) fallaría "no such column"
+   si el índice se creara primero. Con la migración previa: la DB vieja
+   recibe las columnas ANTES (boot sobrevive y fusiona Fases) y la DB
+   nueva no tiene tabla aún (PRAGMA vacía → la migración no hace nada;
+   el schema crea todo). El schema se aplica SIEMPRE: en base vacía crea
+   TODO y sobre una base previa re-ejecuta el DDL idempotente. */
+migrarUsuariosFase2();
 ejecutarSchema();
+
+/* ---------------------------------------------------------------- migración */
+/* Migración ADITIVA para bases anteriores (idempotente): ALTER TABLE sólo si
+   falta la columna, inspeccionando antes PRAGMA table_info. Con esto la
+   tabla `usuarios` de la Fase 1 (teléfono + OTP) gana sin perder datos los
+   campos de la Fase 2: email, password_hash, cuota de OTP y bloqueo de
+   intentos de login. NOTA: ADD COLUMN con DEFAULT (constante) es válido en
+   SQLite; CURRENT_DATE se deja NULL y la lógica de cuota lo trata como
+   "primera vez este mes". */
+function migrarUsuariosFase2() {
+  const cols = selectAll('PRAGMA table_info(usuarios)');
+  if (!cols.length) return;          /* tabla aún no creada (schema la hace) */
+  const presentes = {};
+  cols.forEach(function (c) { presentes[c.name] = true; });
+
+  const campos = {
+    email:             'ALTER TABLE usuarios ADD COLUMN email VARCHAR(140)',
+    password_hash:     'ALTER TABLE usuarios ADD COLUMN password_hash VARCHAR(255)',
+    otp_conteo_mes:    'ALTER TABLE usuarios ADD COLUMN otp_conteo_mes INTEGER DEFAULT 0',
+    otp_ultimo_reset:  'ALTER TABLE usuarios ADD COLUMN otp_ultimo_reset DATE',
+    intentos_fallidos: 'ALTER TABLE usuarios ADD COLUMN intentos_fallidos INTEGER DEFAULT 0'
+  };
+  Object.keys(campos).forEach(function (col) {
+    if (!presentes[col]) {
+      exec(campos[col]);
+      console.log('[db][migracion] usuarios.' + col + ' agregada (Fase 2 de auth)');
+    }
+  });
+
+  /* índices únicos (IF NOT EXISTS → idempotentes; admiten NULL repetidos) */
+  exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_usuarios_telefono ON usuarios (telefono)');
+  exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_usuarios_email ON usuarios (email)');
+}
 
 function nuevoId() {
   return crypto.randomUUID();

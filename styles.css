@@ -1283,6 +1283,60 @@ select.inp{
   background:var(--bg);
 }
 .login-card{max-width:380px;width:100%;padding:26px 22px 20px;text-align:center}
+
+/* Pestañas [Ingresar] / [Registrarse] de la bienvenida */
+.login-tabs{
+  display:flex;gap:6px;justify-content:center;
+  margin:14px 0 10px;padding:4px;
+  background:var(--bg);border:1px solid var(--line);border-radius:12px;
+}
+.login-tab{
+  flex:1;padding:8px 10px;border:0;border-radius:9px;
+  background:transparent;color:var(--muted);
+  font-size:13px;font-weight:600;cursor:pointer;transition:background .15s ease,color .15s ease;
+}
+.login-tab.active{background:var(--brand);color:#fff;box-shadow:var(--shadow-sm)}
+.login-tab:focus-visible{outline:2px solid var(--brand);outline-offset:1px}
+.login-panel{text-align:left}
+
+/* Radios "modo" del registro / recuperación (dos columnas compactas) */
+.reg-modos{display:flex;gap:8px;margin-top:2px}
+.reg-modos .modo-op{flex:1}
+
+/* Enlaces de acción (¿Olvidaste tu contraseña? / Perfil del banner) */
+.login-link{
+  display:inline-block;background:none;border:0;padding:2px;
+  color:var(--brand-text);font-size:12.5px;font-weight:600;
+  text-align:center;cursor:pointer;text-decoration:underline dotted;
+}
+.login-link:hover{text-decoration:underline}
+
+/* Estado en línea del login: mensajes del server (errores en rojo) */
+.login-estado{min-height:16px}
+#login-estado.err{color:#dc2626;font-weight:600}
+
+/* Banner discreto: perfil incompleto (cuenta OTP-only, sin email) —
+   dentro de la app, arriba del dashboard, no invasivo */
+/* Refuerzo del patrón .nuevo-menu: el display de la clase le gana al
+   atributo [hidden] por especificidad — sin esta regla el banner
+   quedaría pintado siempre. Mismo bug de la lección registrada de QA. */
+.banner-alerta[hidden]{display:none!important}
+.banner-alerta{
+  width:min(100% - 2 * var(--pad-screen), var(--wrap-max));
+  margin:12px auto 0;padding:9px 12px;
+  display:flex;align-items:center;gap:6px;flex-wrap:wrap;
+  background:rgba(245,158,11,.14);border:1px solid rgba(245,158,11,.5);
+  border-radius:12px;font-size:12.5px;font-weight:550;color:var(--ink-2);
+}
+.banner-alerta .link-btn{font-size:12.5px}
+.link-btn{
+  background:none;border:0;padding:0;color:var(--brand-text);
+  font-weight:700;cursor:pointer;text-decoration:underline;
+}
+.link-btn:hover{text-decoration:none}
+
+/* Modal de perfil: ayuda compacta alineada */
+#modal-perfil .sub{font-size:11.5px;color:var(--muted)}
 .login-logo{
   width:46px;height:46px;border-radius:14px;
   background:var(--brand);

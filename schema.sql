@@ -168,25 +168,38 @@ CREATE TABLE IF NOT EXISTS repuestos_orden (
 CREATE INDEX IF NOT EXISTS idx_repuestos_orden ON repuestos_orden (orden_id);
 
 -- ---------------------------------------------------------------------------
--- 7) USUARIOS — acceso del taller (Fase 1: login por teléfono + OTP / JWT).
---    Tabla de seguridad autónoma: SIN FK (el token lleva el id). Un registro
---    por número de WhatsApp; el primer teléfono que verifica el OTP queda
---    como 'admin' del taller. Los códigos OTP viven en memoria del server
---    (Fase 2: pasan a ser efímeros por WhatsApp + Cloud API).
+-- 7) USUARIOS — acceso del taller (Fase 2: login dual + perfil + cuotas).
+--    Identidad DUAL: email + contraseña, o teléfono con OTP de WhatsApp.
+--    El hash (scrypt, formato "scrypt$<salt>$<dk>") vive en password_hash,
+--    JAMÁS en texto claro. otp_conteo_mes / otp_ultimo_reset implementan la
+--    cuota de códigos (2 por mes calendario: control de costos SMS/WhatsApp)
+--    e intentos_fallidos el bloqueo de login a los 3 errores (fuerza el
+--    restablecimiento por OTP o por token de email). Tabla de seguridad
+--    autónoma: SIN FK (el JWT lleva el id). Sin teléfono la cuenta opera
+--    pura por email; sin email es OTP-only (el banner pide vincularlo desde
+--    el perfil para poder recuperar la cuenta al agotar los OTP).
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS usuarios (
-  id            VARCHAR(36)  NOT NULL,
-  telefono      VARCHAR(30)  NOT NULL,
-  nombre_taller VARCHAR(120),
-  rol           VARCHAR(20)  DEFAULT 'admin',
-  created_at    TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+  id                VARCHAR(36)  NOT NULL,
+  telefono          VARCHAR(30),
+  email             VARCHAR(140),
+  password_hash     VARCHAR(255),
+  nombre_taller     VARCHAR(120),
+  rol               VARCHAR(20)  DEFAULT 'admin',
+  otp_conteo_mes    INTEGER      DEFAULT 0,
+  otp_ultimo_reset  DATE,
+  intentos_fallidos INTEGER      DEFAULT 0,
+  created_at        TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT pk_usuarios PRIMARY KEY (id),
-  CONSTRAINT ck_usuarios_telefono CHECK (telefono <> '')
+  CONSTRAINT ck_usuarios_contacto CHECK (telefono IS NOT NULL OR email IS NOT NULL)
 );
 
--- Número único (la clave de negocio del login): UNIQUE INDEX explícito,
--- siguiendo la convención del esquema (índice con nombre, no inline)
+/* Claves únicas con nombre (convención del esquema): el teléfono sigue
+   siendo la clave del canal OTP y el email tiene que ser irrepetible.
+   UNIQUE INDEX admite varios NULL (talleres sin email o cuentas
+   email-only sin teléfono). */
 CREATE UNIQUE INDEX IF NOT EXISTS idx_usuarios_telefono ON usuarios (telefono);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_usuarios_email    ON usuarios (email);
 
 COMMIT;
 
@@ -201,6 +214,8 @@ COMMIT;
    idx_ordenes_vehiculo                 — historial cronológico por vehículo
    idx_tareas_orden                     — detalle de tareas por orden
    idx_repuestos_orden                  — detalle de repuestos por orden
+   idx_usuarios_telefono       UNIQUE — clave del canal OTP (WhatsApp)
+   idx_usuarios_email          UNIQUE — clave del acceso email + contraseña
 
    Los índices de patente/DNI se implementan como UNIQUE INDEX para cumplir
    simultáneamente la restricción de unicidad y el nombre de índice pedido
