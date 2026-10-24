@@ -1254,13 +1254,13 @@ select.inp{
 .modo-hint{display:block;margin-top:7px;font-size:11.5px;color:var(--muted)}
 
 /* ============================================================
-   CONMUTACIÓN DE VISTAS RAÍZ (login ⇄ app)
-   Arquitectura: dos contenedores hermanos a nivel del <body>
-   (#vista-login y #vista-app). Sólo UNO lleva .activa; el otro
-   queda display:none. No hay overlays flotantes ni z-index de
-   tapado — y con ello desaparece el viejo conflicto entre el
-   atributo [hidden] y un display propio del componente
-   (misma lección ya aplicada a .nuevo-menu).
+   CONMUTACIÓN DE VISTAS RAÍZ (login ⇄ app ⇄ reset-password)
+   Arquitectura: contenedores hermanos a nivel del <body>
+   (#vista-login, #vista-app y #vista-reset-password). Sólo UNO
+   lleva .activa; el resto queda display:none. No hay overlays
+   flotantes ni z-index de tapado — y con ello desaparece el viejo
+   conflicto entre el atributo [hidden] y un display propio del
+   componente (misma lección ya aplicada a .nuevo-menu).
    ============================================================ */
 .vista-raiz{
   display:none!important;
@@ -1298,6 +1298,54 @@ select.inp{
 .login-tab.active{background:var(--brand);color:#fff;box-shadow:var(--shadow-sm)}
 .login-tab:focus-visible{outline:2px solid var(--brand);outline-offset:1px}
 .login-panel{text-align:left}
+
+/* FASE 3 · VISTA RESET: gemela de #vista-login (misma página limpia,
+   centrada; sin z-index — es vista raíz activa, no overlay) */
+#vista-reset-password{
+  align-items:center;
+  justify-content:center;
+  padding:24px 16px;
+  overflow:auto;
+  background:var(--bg);
+}
+
+/* Ojo de visibilidad en campos de contraseña (Fase 3):
+   el input respira a la derecha y el botón flota dentro */
+.pw-wrap{position:relative}
+.pw-wrap .inp{padding-right:38px}
+.btn-toggle-password{
+  position:absolute;right:6px;top:50%;transform:translateY(-50%);
+  width:26px;height:26px;padding:0;margin:0;flex:0 0 auto;
+  display:flex;align-items:center;justify-content:center;
+  background:none;border:0;border-radius:7px;
+  color:var(--muted);cursor:pointer;
+}
+.btn-toggle-password svg{width:16px;height:16px;display:block}
+.btn-toggle-password:hover{color:var(--ink-2);background:rgba(100,116,139,.12)}
+.btn-toggle-password.activo{color:var(--brand-text)}
+.btn-toggle-password:focus-visible{outline:2px solid var(--brand);outline-offset:1px}
+
+/* Hints de validación en vivo bajo el campo (registro / vista reset) */
+.pw-hint{min-height:14px;margin-top:2px;font-size:11.5px;text-align:left}
+.pw-hint.err{color:#dc2626;font-weight:600}
+.pw-hint.ok{color:#16a34a;font-weight:600}
+
+/* Perfil (Fase 3): badge de email vinculado y aviso si falta */
+.badge-verde{
+  display:inline-flex;align-items:center;gap:4px;
+  background:rgba(22,163,74,.12);border:1px solid rgba(22,163,74,.5);
+  color:#15803d;font-size:12px;font-weight:700;
+  padding:4px 10px;border-radius:999px;
+}
+/* display de la clase gana a [hidden]: patrón .nuevo-menu (lección QA) */
+.badge-verde[hidden]{display:none!important}
+.aviso-inline{color:#b45309;font-size:12px;font-weight:600}
+/* En tema oscuro el verde del badge se aclara (dos vías: media del SO y
+   data-theme explícito — mismas que usa el bloque de variables) */
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]) .badge-verde{color:#4ade80}
+}
+:root[data-theme="dark"] .badge-verde{color:#4ade80}
 
 /* Radios "modo" del registro / recuperación (dos columnas compactas) */
 .reg-modos{display:flex;gap:8px;margin-top:2px}

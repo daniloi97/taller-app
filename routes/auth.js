@@ -1,5 +1,6 @@
 ﻿/* ============================================================================
-   routes/auth.js — /api/v1/auth (Fase 2: login dual + perfil + cuotas)
+   routes/auth.js — /api/v1/auth (Fase 2: login dual + perfil + cuotas;
+   Fase 3: confirmación de contraseña + cambio por enlace desde el perfil)
 
    ARQUITECTURA DE LA PANTALLA DE BIENVENIDA (dual):
      · Registro:    email + contraseña, o teléfono + OTP + contraseña.
@@ -66,8 +67,8 @@ const OTP_CUOTA_MENSUAL = 2;
 /* Restablecimiento por token de email */
 const TOKEN_RESET_VIDA_MS = 15 * 60 * 1000;   /* el token vive 15 minutos */
 
-/* Contraseña: mínimo exigido (API + front avisan lo mismo) */
-const PASSWORD_MIN = 8;
+/* Contraseña: mínimo exigido (API + front avisan igual: 6) */
+const PASSWORD_MIN = 6;
 
 /* --------------------------------------------------------------------------------
    Stores en memoria (volátiles a propósito: reiniciar el server invalida todo).
@@ -595,6 +596,77 @@ router.put('/profile', proteger, function (req, res) {
   /* Teléfono cambiado ⇒ token nuevo (el JWT viejo trae el teléfono anterior). */
   if (actualizada.telefono !== fila.telefono) respuesta.token = firmarToken(actualizada);
   res.status(200).json(respuesta);
+});
+
+/* ==================== FASE 3 · cambio de contraseña desde el perfil ======= */
+
+/* ------------------------- POST /request-password-reset-email ------------ */
+/* Solicitud de cambio de contraseña por email, DESDE EL PERFIL (requiere
+   sesión activa — a diferencia de /olvide-password que es público). Genera
+   un token temporal de 15 min (mismo store resetsEmail que /reset-password
+   via 'token') y "envía" el correo con el enlace de restablecimiento:
+     {FRONT_URL}#reset-password?token=XYZ
+   Mock: consola del server + dev.enlace en desarrollo (SMTP real: Fase 4). */
+router.post('/request-password-reset-email', proteger, function (req, res) {
+  const fila = usuarioPorId(req.usuario.sub);
+  if (!fila) fail(401, 'La cuenta del token ya no existe: iniciá sesión de nuevo');
+
+  if (!emailValido(fila.email)) {
+    fail(400, 'Tu cuenta no tiene un email vinculado: cargalo en tu perfil primero.');
+  }
+
+  const token = crypto.randomBytes(24).toString('hex');
+  resetsEmail.set(token, { email: fila.email, expira: Date.now() + TOKEN_RESET_VIDA_MS });
+
+  const front = (process.env.FRONT_URL || 'http://localhost:5500/').replace(/\/+$/, '');
+  const enlace = front + '/#reset-password?token=' + token;
+  console.log('[auth][EMAIL-MOCK] → ' + fila.email + ' · enlace de cambio de contraseña (15 min): ' + enlace);
+
+  const respuesta = {
+    ok: true,
+    mensaje: 'Si el email está vinculado, te enviamos el enlace (válido 15 minutos): ' + fila.email,
+    expiraEn: Math.round(TOKEN_RESET_VIDA_MS / 1000)
+  };
+  /* En desarrollo el enlace vuelve en la respuesta para probarlo sin correo */
+  if (process.env.NODE_ENV === 'development') respuesta.dev = { token: token, enlace: enlace };
+  res.status(200).json(respuesta);
+});
+
+/* ------------------------- POST /confirm-password-reset ------------------ */
+/* Confirmación desde la vista raíz #vista-reset-password (el usuario llegó
+   por el enlace del email). Recibe { token, newPassword }, valida que el
+   token exista y no esté vencido, actualiza password_hash + limpia el
+   bloqueo y ANULA el token (one-shot). Comparte store con /reset-password
+   via 'token' pero con campo distinto — el front de la vista lo llama. */
+router.post('/confirm-password-reset', function (req, res) {
+  const body = req.body || {};
+  const token = String(body.token == null ? '' : body.token).trim();
+  const newPassword = String(body.newPassword == null ? '' : body.newPassword);
+
+  if (!token) fail(400, 'Falta el token del enlace de cambio de contraseña');
+  if (!passwordValido(newPassword)) {
+    fail(400, 'La nueva contraseña debe tener al menos ' + PASSWORD_MIN + ' caracteres');
+  }
+
+  const guarda = resetsEmail.get(token);
+  if (!guarda || Date.now() > guarda.expira) {
+    resetsEmail.delete(token);
+    fail(400, 'El enlace es inválido o ya venció (15 min): pedí uno nuevo desde tu perfil.');
+  }
+
+  const usuario = db.getOne('SELECT * FROM usuarios WHERE email = ?', [guarda.email]);
+  if (!usuario) {
+    resetsEmail.delete(token);
+    fail(404, 'No hay cuenta con el email del enlace: registrate primero');
+  }
+
+  db.run(
+    'UPDATE usuarios SET password_hash = ?, intentos_fallidos = 0 WHERE id = ?',
+    [hashPassword(newPassword), usuario.id]
+  );
+  resetsEmail.delete(token);     /* one-shot: el enlace vale un solo uso */
+  console.log('[auth] Contraseña actualizada vía enlace para ' + guarda.email);
+  res.status(200).json({ ok: true, mensaje: 'Contraseña actualizada: ingresá con tu nueva contraseña.' });
 });
 
 module.exports = { router: router, proteger: proteger };

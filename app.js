@@ -2217,6 +2217,14 @@ function iniciarCamara() {
     'reset-confirmar-token': function (el) { resetConfirmarToken(el); },
     perfil: function () { abrirPerfil(); },
     'guardar-perfil': function (el) { guardarPerfil(el); },
+    /* Fase 3: enlace de cambio de contraseña (perfil) y confirmación
+       en la vista raíz #vista-reset-password */
+    'pedir-reset-email': function (el) { pedirResetEmail(el); },
+    'actualizar-password': function (el) { actualizarPasswordFinal(el); },
+    'rp-volver-login': function () {
+      try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {}
+      mostrarLogin();
+    },
     logout: function () { cerrarSesion(); },
     scan: function () { abrirEscaner(); },
     capturar: function () { capturarYLeer(); },
@@ -2394,6 +2402,45 @@ function iniciarCamara() {
     });
   });
 
+  /* Validación en vivo del registro y de la vista de reset (Fase 3):
+     cada 'input' en cualquier de los dos campos refresca hints + botón */
+  ['#reg-clave', '#reg-password-confirm'].forEach(function (sel) {
+    $(sel).addEventListener('input', validarClaveRegistro);
+  });
+  ['#reset-new-password', '#reset-new-password-confirm'].forEach(function (sel) {
+    $(sel).addEventListener('input', validarClaveResetVR);
+  });
+
+  /* Enter en los formularios nuevos (Fase 3) */
+  ['#reg-clave', '#reg-password-confirm'].forEach(function (sel) {
+    $(sel).addEventListener('keydown', function (ev) {
+      if (ev.key === 'Enter') { ev.preventDefault(); ACCIONES['registrar']($('#reg-crear')); }
+    });
+  });
+  ['#reset-new-password', '#reset-new-password-confirm'].forEach(function (sel) {
+    $(sel).addEventListener('keydown', function (ev) {
+      if (ev.key === 'Enter') { ev.preventDefault(); ACCIONES['actualizar-password']($('#btn-actualizar-contrasena')); }
+    });
+  });
+
+  /* Ojo de visibilidad (Fase 3): UN solo listener delegado para TODOS
+     los .btn-toggle-password (registro, login, reset y vista raíz).
+     Alterna type password↔text e intercambia el ícono. */
+  var SVG_OJO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+  var SVG_OJO_OFF = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+  document.addEventListener('click', function (ev) {
+    var btn = ev.target && ev.target.closest ? ev.target.closest('.btn-toggle-password') : null;
+    if (!btn) return;
+    var campo = $('#' + btn.dataset.target);
+    if (!campo) return;
+    var mostrar = campo.type === 'password';
+    campo.type = mostrar ? 'text' : 'password';
+    btn.innerHTML = mostrar ? SVG_OJO_OFF : SVG_OJO;
+    btn.classList.toggle('activo', mostrar);
+    btn.setAttribute('aria-label', mostrar ? 'Ocultar contraseña' : 'Mostrar contraseña');
+    campo.focus();
+  });
+
   /* Switch "Propietario desconocido" vs. datos del nuevo titular */
   $('#tr-sin-titular').addEventListener('change', alternarDatosTitular);
 
@@ -2437,6 +2484,10 @@ function iniciarCamara() {
   var registroPorOtp = false;    /* el paso 2 cierra un REGISTRO (no un ingreso) */
   var claveRegistro = '';        /* contraseña del registro por OTP (paso 2) */
 
+  /* Mínimo de contraseña del FRONT (validación en vivo). Coincide con
+     PASSWORD_MIN del backend (routes/auth.js): 6. */
+  var PASSWORD_MIN_FRONT = 6;
+
   /* ---------------------------------------------------------------
      apiCrudo: fetch del endpoint tal cual devuelve { status, cuerpo }
      SIN toasts ni excepciones — para pantallas de login/registro que
@@ -2479,20 +2530,23 @@ function iniciarCamara() {
   function mostrarLogin(mensajeEstado) {
     var login = $('#vista-login');
     var app = $('#vista-app');
+    var rp = $('#vista-reset-password');
     if (login) login.classList.add('activa');
     if (app) app.classList.remove('activa');
+    if (rp) rp.classList.remove('activa');
     registroPorOtp = false;
     claveRegistro = '';
     mostrarPanelLogin('ingresar', null);
     /* Logout / vencimiento: formularios limpios (también los otros paneles,
        para que nada quede precargado entre sesiones de la misma máquina) */
     ['login-email', 'login-clave', 'login-tel', 'login-otp', 'login-taller',
-     'reg-taller', 'reg-email', 'reg-tel', 'reg-clave',
+     'reg-taller', 'reg-email', 'reg-tel', 'reg-clave', 'reg-password-confirm',
      'reset-tel', 'reset-otp', 'reset-clave-otp',
      'reset-email', 'reset-token', 'reset-clave-token'].forEach(function (id) {
       var campo = $('#' + id);
       if (campo) campo.value = '';
     });
+    validarClaveRegistro();      /* resetea hints + estado del botón Crear */
     var rEmail = $('#reg-modo-email');
     if (rEmail) rEmail.checked = true;
     toggleModoRegistro('email');
@@ -2508,8 +2562,10 @@ function iniciarCamara() {
   function mostrarApp() {
     var login = $('#vista-login');
     var app = $('#vista-app');
+    var rp = $('#vista-reset-password');
     if (app) app.classList.add('activa');
     if (login) login.classList.remove('activa');
+    if (rp) rp.classList.remove('activa');
   }
 
   /* Topbar: nombre del taller logueado + banner de perfil incompleto
@@ -2701,7 +2757,7 @@ function iniciarCamara() {
     var taller = String($('#reg-taller').value || '').trim();
     var clave = String($('#reg-clave').value || '');
 
-    if (clave.length < 8) { setEstado('La contraseña debe tener al menos 8 caracteres', true); return; }
+    if (clave.length < PASSWORD_MIN_FRONT) { setEstado('La contraseña debe tener al menos ' + PASSWORD_MIN_FRONT + ' caracteres', true); return; }
 
     if (modo === 'email') {
       var email = String($('#reg-email').value || '').trim();
@@ -2855,6 +2911,10 @@ function iniciarCamara() {
     $('#pf-taller').value = u.nombreTaller || '';
     $('#pf-creada').textContent = u.createdAt ? String(u.createdAt).slice(0, 10) : '—';
     $('#pf-cuota').textContent = u.cuotaOtp ? (u.cuotaOtp.usados + '/' + u.cuotaOtp.limite) : '—';
+    /* Fase 3: estado del email + línea de reset limpia en cada apertura */
+    estadoEmailEnPerfil(u);
+    var pfe = $('#pf-reset-estado');
+    if (pfe) { pfe.textContent = ''; pfe.classList.remove('err'); }
     abrirModal('#modal-perfil');
     try {
       var fresco = await api('/auth/profile');
@@ -2868,6 +2928,7 @@ function iniciarCamara() {
         /* Datos frescos al localStorage: el banner y la pill no se atrasan */
         guardarSesion(tokenSesion(), v);
         mostrarSesionUI();
+        estadoEmailEnPerfil(v);
       }
     } catch (e) { /* 401/Red: ya se notificó; el modal queda editable */ }
   }
@@ -2891,6 +2952,168 @@ function iniciarCamara() {
     mostrarSesionUI();
     toast('Perfil actualizado');
   }
+
+  /* ==================================================================
+     FASE 3 · confirmación de contraseña + cambio por enlace de email
+     ================================================================== */
+
+  /* Hint de validación en vivo bajo un campo de contraseña:
+     '' → neutro; err → rojo con mensaje; ok → verde "Correcto". */
+  function setHint(sel, ok, err) {
+    var el = $(sel);
+    if (!el) return;
+    el.textContent = err ? ('⚠ ' + err) : (ok ? '✓ Correcto' : '');
+    el.className = 'pw-hint' + (err ? ' err' : (ok ? ' ok' : ''));
+  }
+
+  /* Registro: clave ≥ 6 y ambas iguales → habilitan #reg-crear.
+     Corre en cada 'input' de ambos campos (tiempo real). */
+  function validarClaveRegistro() {
+    var a = $('#reg-clave'), b = $('#reg-password-confirm');
+    var crear = $('#reg-crear');
+    if (!a || !b) return;
+    var clave = a.value;
+    var okA = clave.length >= PASSWORD_MIN_FRONT;
+    setHint('#reg-clave-estado', okA, (!okA && clave.length) ? ('Mínimo ' + PASSWORD_MIN_FRONT + ' caracteres') : '');
+    var okB = okA && b.value.length > 0 && b.value === clave;
+    setHint('#reg-confirm-estado', okB, (okA && b.value && b.value !== clave) ? 'Las contraseñas no coinciden' : '');
+    if (crear) crear.disabled = !(okA && okB);
+  }
+
+  /* Vista raíz #vista-reset-password: misma regla (≥6 + coinciden)
+     → habilita #btn-actualizar-contrasena. */
+  function validarClaveResetVR() {
+    var a = $('#reset-new-password'), b = $('#reset-new-password-confirm');
+    var btn = $('#btn-actualizar-contrasena');
+    if (!a || !b) return;
+    var clave = a.value;
+    var okA = clave.length >= PASSWORD_MIN_FRONT;
+    setHint('#rp-clave-estado', okA, (!okA && clave.length) ? ('Mínimo ' + PASSWORD_MIN_FRONT + ' caracteres') : '');
+    var okB = okA && b.value.length > 0 && b.value === clave;
+    setHint('#rp-confirm-estado', okB, (okA && b.value && b.value !== clave) ? 'Las contraseñas no coinciden' : '');
+    if (btn) btn.disabled = !(okA && okB);
+  }
+
+  /* Perfil: estado del email → badge verde / aviso + habilitación del
+     botón "Enviar enlace de cambio de contraseña". Corre al abrir el
+     modal y después de cualquier PUT de perfil fresco. */
+  function estadoEmailEnPerfil(u) {
+    var tiene = Boolean(u && u.email);
+    var badge = $('#pf-badge-email');
+    var aviso = $('#pf-aviso-email');
+    var btn = $('#btn-solicitar-reset');
+    if (badge) badge.hidden = !tiene;
+    if (aviso) aviso.hidden = tiene;
+    if (btn) btn.disabled = !tiene;
+  }
+
+  /* Solicitud del ENLACE de cambio (perfil → POST protegido). En
+     desarrollo la respuesta trae dev.enlace: se muestra en línea para
+     poder probar el flujo sin buzón de correo real. */
+  async function pedirResetEmail(btn) {
+    var est = $('#pf-reset-estado');
+    var fin = await conEnvio(btn, async function () {
+      var r = await apiCrudo('/auth/request-password-reset-email', { method: 'POST' });
+      if (r.status === 200) {
+        var msg = '✅ Enlace enviado a tu email (válido 15 minutos).';
+        if (r.cuerpo && r.cuerpo.dev && r.cuerpo.dev.enlace) {
+          msg = '✅ (mock dev) Enlace: ' + r.cuerpo.dev.enlace;
+        }
+        if (est) { est.textContent = msg; est.classList.remove('err'); }
+        else toast('Enlace de cambio de contraseña enviado');
+        return;
+      }
+      var msgErr = (r.cuerpo && r.cuerpo.error && r.cuerpo.error.mensaje) || ('Error HTTP ' + r.status);
+      if (est) { est.textContent = msgErr; est.classList.add('err'); }
+      else toast(msgErr, true);
+    });
+  }
+
+  /* Token del enlace en juego (lo fija mostrarVistaReset al detectar
+     la URL; lo consume actualizarPasswordFinal). */
+  var tokenResetActual = '';
+
+  /* VISTA RAÍZ RESET: activa SÓLO #vista-reset-password (el usuario
+     llegó por el enlace del email — puede o no tener sesión previa). */
+  function mostrarVistaReset(token, mensajeEstado) {
+    var login = $('#vista-login');
+    var app = $('#vista-app');
+    var rp = $('#vista-reset-password');
+    if (rp) rp.classList.add('activa');
+    if (login) login.classList.remove('activa');
+    if (app) app.classList.remove('activa');
+    tokenResetActual = token || '';
+    ['reset-new-password', 'reset-new-password-confirm'].forEach(function (id) {
+      var c = $('#' + id);
+      if (c) c.value = '';
+    });
+    validarClaveResetVR();
+    var est = $('#rp-estado');
+    if (est) {
+      est.textContent = mensajeEstado || '';
+      est.classList.toggle('err', Boolean(mensajeEstado));
+    }
+  }
+
+  /* Detección de la URL del enlace: el hash es #reset-password?token=XYZ
+     (también se acepta ?token= en el query con ese hash). Devuelve el
+     token o null si la URL no corresponde a la vista reset. */
+  function deteccionResetUrl() {
+    var hash = location.hash || '';
+    if (hash.indexOf('reset-password') === -1) return null;
+    var m = /token=([^&]+)/.exec(hash) || /token=([^&]+)/.exec(location.search || '');
+    return { token: m ? decodeURIComponent(m[1]) : '' };
+  }
+
+  /* Confirmación del cambio desde la vista raíz (POST público con token
+     one-shot). Éxito: congela el formulario, toast, limpia la sesión
+     (la próxima entrada es con la clave nueva) y a los 2 segundos redirige
+     a #vista-login con el hash limpio. */
+  async function actualizarPasswordFinal(btn) {
+    var a = $('#reset-new-password'), b = $('#reset-new-password-confirm');
+    var est = $('#rp-estado');
+    if (!tokenResetActual) {
+      if (est) { est.textContent = 'Este enlace no trae un token válido: pedí uno nuevo desde tu Perfil.'; est.classList.add('err'); }
+      return;
+    }
+    if ((a.value || '').length < PASSWORD_MIN_FRONT) {
+      validarClaveResetVR();
+      return;
+    }
+    if (a.value !== b.value) {
+      validarClaveResetVR();
+      return;
+    }
+    var ok = false;
+    await conEnvio(btn, async function () {
+      var r = await apiCrudo('/auth/confirm-password-reset', {
+        method: 'POST',
+        body: { token: tokenResetActual, newPassword: a.value }
+      });
+      ok = r.status === 200;
+      if (!ok) {
+        var msg = (r.cuerpo && r.cuerpo.error && r.cuerpo.error.mensaje) || ('Error HTTP ' + r.status);
+        if (est) { est.textContent = msg; est.classList.add('err'); }
+        else toast(msg, true);
+      }
+    });
+    if (!ok) return;
+
+    /* Éxito: formulario desactivado + toast + redirect programado */
+    [a, b].forEach(function (c) { c.disabled = true; });
+    var btnAct = $('#btn-actualizar-contrasena');
+    if (btnAct) btnAct.disabled = true;
+    if (est) { est.textContent = '✅ Contraseña actualizada: te llevamos al ingreso…'; est.classList.remove('err'); }
+    toast('Contraseña actualizada: ingresá con tu nueva contraseña');
+    limpiarSesion();             /* re-login con la contraseña nueva */
+    setTimeout(function () {
+      try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {}
+      mostrarLogin('Contraseña actualizada: ingresá con tu nueva contraseña.');
+      [a, b].forEach(function (c) { c.disabled = false; });
+      validarClaveResetVR();
+    }, 2000);
+  }
+
 
 
   /* Salir: borra token+usuario, resetea navegación y datos en memoria y
@@ -2943,13 +3166,33 @@ function iniciarCamara() {
 
   /* Gate de sesión (Fase 1 de auth): sin taller_token la app queda cubierta
      por la pantalla de login; con token guardado arranca directo — si el
-     token ya no vale, el primer 401 corta la sesión y muestra el login. */
+     token ya no vale, el primer 401 corta la sesión y muestra el login.
+     EXCEPCIÓN (Fase 3): si la URL trae el enlace de reset-password la
+     vista #vista-reset-password gana antes que cualquiera de las dos. */
   mostrarSesionUI();
-  if (!tokenSesion()) {
+  var detUrl = deteccionResetUrl();
+  if (detUrl) {
+    mostrarVistaReset(detUrl.token, detUrl.token
+      ? ''
+      : 'El enlace no trae un token: volvé a pedilo desde tu Perfil una vez dentro.');
+  } else if (!tokenSesion()) {
     mostrarLogin();          /* gate: la vista login es la activa hasta verificar */
   } else {
     mostrarApp();            /* sesión guardada: el dashboard es la vista activa; si
                                 el token no vale, el primer 401 corta y vuelve al login */
     arrancarDatos();
   }
+
+  /* hashchange (deep-links de la app + llegada del enlace por email):
+     el guard limita la reacción al hash de la vista reset — los demás
+     hashes (#patente, #dni…) son de búsqueda y no conmutan vistas. */
+  window.addEventListener('hashchange', function () {
+    if ((location.hash || '').indexOf('reset-password') === -1) return;   /* guard */
+    var det = deteccionResetUrl();
+    if (det) mostrarVistaReset(det.token, det.token ? '' : 'El enlace no trae un token: pedí uno nuevo desde tu Perfil.');
+  });
+
+  /* Estado inicial de la validación en vivo del registro (botón disabled) */
+  validarClaveRegistro();
+  validarClaveResetVR();
 })();
