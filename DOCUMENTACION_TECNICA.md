@@ -21,7 +21,7 @@ autentica (email + contraseña, o WhatsApp por OTP) y opera el sistema completo.
 
 | Pieza | Stack | Rol |
 |---|---|---|
-| Frontend SPA | Vanilla JS (ES5, IIFE), HTML, CSS | UI completa, escáner de cámara con ALPR neuronal 100 % en cliente |
+| Frontend SPA | Vanilla JS (ES2017+: async/await), IIFE, HTML, CSS | UI completa, escáner de cámara con ALPR neuronal 100 % en cliente |
 | Backend API | Node.js ≥18 · Express 4 · better-sqlite3 | API REST `/api/v1`, auth JWT, única puerta a la DB relacional |
 
 **Pilares fundamentales:**
@@ -29,7 +29,9 @@ autentica (email + contraseña, o WhatsApp por OTP) y opera el sistema completo.
 1. **Rendimiento en cliente.** El ALPR (reconocimiento de patentes) corre
    100 % en el navegador con ONNX Runtime Web (WebGL/Wasm): la cámara no
    envía un solo frame al servidor. Los pesos neuronales (≈15 MB) viven en
-   `models/` y se cargan por HTTP local — el escaneo funciona sin internet.
+   `models/` y se cargan por HTTP local — los pesos son 100 % locales;
+   el runtime `onnxruntime-web` sí carga del CDN en la primera visita
+   (para offline total en producción hay que vendorizarlo: ver § 5.3).
 2. **Arquitectura cliente-servidor desacoplada.** El front no guarda datos de
    negocio (cero SQLite en el navegador): cada consulta y mutación viaja por
    `fetch` a la API. El estado local se limita a sesión + tema.
@@ -37,9 +39,12 @@ autentica (email + contraseña, o WhatsApp por OTP) y opera el sistema completo.
    bottom sheets modales, temperatura táctil en el escáner).
 4. **Offline-first / ligero.** La app es ligera por diseño (sin framework,
    sin bundler, `onnxruntime-web` descargado una sola vez del CDN, modelos
-   locales). Degradación amable: sin modelos queda la lectura manual de
-   patente; sin API avisa con mensaje accionable. *(La PWA instalable con
-   service worker queda en el roadmap — § 7.)*
+   locales). Los **pesos neuronales (≈15 MB) operan sin red** (`models/`),
+   pero el **runtime carga del CDN en la primera visita** — para offline
+   total en producción hay que vendorizarlo (detalle en § 5.3). Degradación
+   amable: sin conexión queda la lectura manual de patente; sin API avisa
+   con mensaje accionable. *(La PWA instalable con service worker queda en
+   el roadmap — § 7.)*
 
 ---
 
@@ -348,9 +353,9 @@ nunca exponen stack — QA fase1 cubre los flujos token/OTP y algunos 400/401/40
 
 | Archivo | Tamaño | Responsabilidad |
 |---|---|---|
-| `index.html` | 759 líneas | Estructura declarativa: 3 vistas raíz + 8 modales + `#toasts`; carga `app.js` al FINAL del body (sin defer/async — el IIFE controla arranque) |
-| `app.js` | 3.046 líneas | Toda la lógica en UNA IIFE (cero variables globales): API, estado, render, escáner ALPR, auth dual, perfil, restauración de contraseña, tema |
-| `styles.css` | 1.264 líneas | Mobile-first, variables de tema (`--brand`…), vistas raíz (`.vista-raiz`), bottom sheets, ALPR HUD |
+| `index.html` | ~750 líneas | Estructura declarativa: 3 vistas raíz + 8 modales + `#toasts`; carga `app.js` al FINAL del body (sin defer/async — el IIFE controla arranque) |
+| `app.js` | ~3.000 líneas | Toda la lógica en UNA IIFE (cero variables globales): API, estado, render, escáner ALPR, auth dual, perfil, restauración de contraseña, tema |
+| `styles.css` | ~1.250 líneas | Mobile-first, variables de tema (`--brand`…), vistas raíz (`.vista-raiz`), bottom sheets, ALPR HUD |
 
 ### 5.2 Estado global y persistencia
 
@@ -397,12 +402,25 @@ Detalles de ingeniería que hacen viable el pilar "rendimiento en cliente":
 - **`onnxruntime-web@1.20.1`** vía CDN (3 urls de respaldo) — se baja UNA
   vez por sesión (cola de callbacks); las **sesiones neuronales se compilan
   UNA vez** (WebGL EP con respaldo **Wasm**) y persisten entre capturas.
-- Pesos (≈15 MB) en **`models/`** servidos por HTTP local → escaneo sin
-  internet. `models/README.txt` documenta shapes y licencias (MIT/Apache-2.0).
+- Pesos (≈15 MB) en **`models/`** servidos por HTTP local — los pesos
+  forman parte del bundle local. `models/README.txt` documenta shapes y
+  licencias (MIT/Apache-2.0).
 - Resiliencia: sin cámara/modelos/CDN → banner de la caja de escaneo con
-  lectura manual de patente disponible.
+  lectura manual de patente disponible (`cargarOrtScript()` prueba 3 CDNs
+  con timeout de 30 s por intento, luego cae a lectura manual).
 - 2do intento: recorta banda superior del ROI (`corteBanda = 0.18`) — mejora
   lecturas donde el techo del auto invade el ROI.
+
+> **⚠ Nota de offline-first real (producción).** Hoy el MOTOR
+> `onnxruntime-web@1.20.1` se descarga del CDN en la primera sesión: los
+> pesos son locales, pero si el taller no tiene conexión en esa primera
+> carga, el runtime no compila y el escáner queda en lectura manual (el
+> código lo avisa explícitamente). En producción hay que **vendorizar el
+> runtime** en el deploy: alojar `ort.all.min.js` + los binarios `.wasm`
+> locales (p. ej. `vendor/onnx/`) junto a los pesos `.onnx` y configurar
+> `ort.env.wasm.wasmPaths = '/vendor/onnx/'` en el arranque del motor.
+> Con eso, escáner + pesos quedan 100 % locales y el CDN deja de ser una
+> dependencia operativa. *(Se referencia también desde el pilar 4, § 1.)*
 
 ### 5.4 Flujo de autenticación dual (UX del operador)
 
@@ -464,6 +482,16 @@ $env:QA_PORT='3000'; node scripts/qa-auth-fase4.cjs   # etc.
 Front estático: servir el repo por cualquier servidor estático (ej. :8800) —
 `API_BASE` mapea `localhost → http://localhost:3000/api/v1` (desarrollo) o
 `/api/v1` en el mismo origen (producción: detrás del mismo dominio/proxy).
+
+**Respaldo de la BD con el servidor en caliente (producción):** con SQLite
+abierto en modo WAL, NO se copia el archivo `taller.sqlite` plano (la copia
+no captura el `-wal` y puede salir corrupta). El mecanismo correcto es un
+snapshot consistente dentro del propio motor: `VACUUM INTO
+'data/backup-YYYY-MM-DD.sqlite'` (SQL, SQLite 3.27+) o la API de backup
+en línea del driver — `better-sqlite3` v11 lo expone como
+`db.backup(destination)` (asíncrono, no bloqueante, usa el mecanismo de
+backup de SQLite atravesando el WAL) — programado en un cron/Task
+Scheduler fuera del proceso Express.
 
 ### 6.2 Variables de entorno (`.env.example`)
 
@@ -545,8 +573,11 @@ Front estático: servir el repo por cualquier servidor estático (ej. :8800) —
 ```
 - **Fase de despliegue 1 (VPS único):** front estático servido por nginx/Caddy
   (mismo origen → `API_BASE='/api/v1'`, cero CORS), API Node bajo PM2/systemd,
-  DB SQLite WAL con snapshot diario montado en volumen persistente. HTTPS +
-  `CORS_ORIGIN` del dominio.
+  DB SQLite WAL con snapshot diario montado en volumen persistente — el
+  respaldo se ejecuta en caliente con `VACUUM INTO 'data/backup-…sqlite'`
+  o `db.backup()` del driver (§ 6.1), JAMÁS copiando el `.sqlite` plano
+  con la WAL abierta (riesgo de corrupción). HTTPS + `CORS_ORIGIN` del
+  dominio.
 - **Fase de despliegue 2 (gestionada):** DB → PostgreSQL gestionado (RDS/
   Supabase/Neon) activando el adapter pg; API sigue serverless-friendly
   (las rutas Express son balanceables; sea VPS o Function-per-endpoint).
@@ -562,7 +593,7 @@ sus baterías verdes y sus E2E.**
 
 ---
 
-*Fin del documento. Fuente auditada: `server.js` (148 líneas), `db.js`,
+*Fin del documento. Fuente auditada: `server.js` (~150 líneas), `db.js`,
 `schema.sql`, `routes/{auth,clientes,vehiculos,ordenes}.js`, `utils/*`,
-`app.js` (3.046), `index.html`, `styles.css`, `models/*`, `scripts/*`,
+`app.js` (~3.000), `index.html`, `styles.css`, `models/*`, `scripts/*`,
 `package.json`, `.env.example`, `.gitignore`, `arranque-rapido.cmd`.*
