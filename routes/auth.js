@@ -203,6 +203,22 @@ function textoPersonalValido(v) {
   return t.length >= 1 && t.length <= ID_PERSONAL_MAX;
 }
 
+/* ---------------------------------------------------------- duplicados --- */
+/* Mensaje único y amigable para la cuenta YA registrada (Fase 4b): el
+   operador sabe de una vez que debe cambiar de pestaña (ir a Ingresar). */
+const MENSAJE_DUPLICADO = 'El correo o teléfono ya se encuentra registrado. Por favor iniciá sesión.';
+
+/* Captura la violación de restricción UNIQUE de la BD ( carrera entre el
+   check-then-insert y el INSERT real: idx_usuarios_email /
+   idx_usuarios_telefono). Sin esto, la carrera escaparía como 500
+   ERROR_INTERNO; con esto se convierte en un 409 con el mismo mensaje. */
+function rebotarSiDuplicado(e) {
+  if (/UNIQUE constraint failed: usuarios\.(email|telefono)/i.test(String(e.message))) {
+    fail(409, MENSAJE_DUPLICADO);
+  }
+  throw e;   /* cualquier otro error de BD: 500 real, no lo enmascaro */
+}
+
 function usuarioPorId(id) {
   return db.getOne('SELECT * FROM usuarios WHERE id = ?', [id]);
 }
@@ -305,9 +321,10 @@ router.post('/verify-otp', function (req, res) {
   const guarda = consumirOtp(tel, otp);
 
   const idNuevo = db.nuevoId();
-  db.tx(function () {
-    const previo = db.getOne('SELECT id FROM usuarios WHERE telefono = ?', [tel]);
-    if (previo) {
+  try {
+    db.tx(function () {
+      const previo = db.getOne('SELECT id FROM usuarios WHERE telefono = ?', [tel]);
+      if (previo) {
       if (nombreTaller || password || nombre || apellido) {
         db.run(
           'UPDATE usuarios SET nombre = COALESCE(?, nombre), apellido = COALESCE(?, apellido), ' +
@@ -328,6 +345,11 @@ router.post('/verify-otp', function (req, res) {
       );
     }
   });
+  } catch (e) {
+    /* El INSERT de la rama else puede chocar con idx_usuarios_telefono si
+       /register por teléfono creó la fila en la brecha del check anterior */
+    rebotarSiDuplicado(e);
+  }
 
   const fila = db.getOne('SELECT * FROM usuarios WHERE telefono = ?', [tel]);
   res.status(200).json({ token: firmarToken(fila), usuario: usuarioPublico(fila) });
@@ -362,15 +384,20 @@ router.post('/register', function (req, res) {
     if (!emailValido(email)) fail(400, 'Email inválido: revisá el formato (p.ej. taller@correo.com)');
 
     if (db.getOne('SELECT id FROM usuarios WHERE email = ?', [email])) {
-      fail(409, 'Ese email ya está registrado: usá Ingresar (o ¿Olvidaste tu contraseña?)');
+      fail(409, MENSAJE_DUPLICADO);
     }
 
     const id = db.nuevoId();
-    db.run(
-      'INSERT INTO usuarios (id, email, password_hash, nombre, apellido, nombre_taller, rol, ' +
-      'otp_conteo_mes) VALUES (?, ?, ?, ?, ?, ?, ?, 0)',
-      [id, email, hashPassword(password), nombre, apellido, nombreTaller || null, 'admin']
-    );
+    try {
+      db.run(
+        'INSERT INTO usuarios (id, email, password_hash, nombre, apellido, nombre_taller, rol, ' +
+        'otp_conteo_mes) VALUES (?, ?, ?, ?, ?, ?, ?, 0)',
+        [id, email, hashPassword(password), nombre, apellido, nombreTaller || null, 'admin']
+      );
+    } catch (e) {
+      /* UNIQUE idx_usuarios_email (carrera entre el check y el INSERT) */
+      rebotarSiDuplicado(e);
+    }
     const fila = usuarioPorId(id);
     return res.status(201).json({ token: firmarToken(fila), usuario: usuarioPublico(fila) });
   }
@@ -381,7 +408,7 @@ router.post('/register', function (req, res) {
       fail(400, 'Número inválido: enviá el WhatsApp en formato internacional sin espacios, p.ej. 5491112345678');
     }
     if (db.getOne('SELECT id FROM usuarios WHERE telefono = ?', [tel])) {
-      fail(409, 'Ese número ya tiene cuenta: usá Ingresar por WhatsApp (OTP)');
+      fail(409, MENSAJE_DUPLICADO);
     }
 
     /* Sin fila de usuario todavía: la cuota mensual arranca con la cuenta.
@@ -413,9 +440,12 @@ router.post('/register', function (req, res) {
 });
 
 /* -------------------------------------------------------- POST /login ---- */
-/* Email + contraseña. Mensajes con contador: "Credenciales incorrectas.
-   Intentos restantes: 2". Al 3º error, 403 con { forceReset: true, error } —
-   el front conmuta automáticamente a la vista restablecer contraseña. */
+/* Email + contraseña. Credenciales erróneas de un usuario EXISTENTE llevan
+   contador: "Credenciales incorrectas. Intentos restantes: 2"; el email NO
+   registrado recibe el mensaje explícito "Usuario no registrado o
+   contraseña incorrecta." (Fase 4b) para que el operador sepa que debe
+   registrarse. Al 3º error, 403 con { forceReset: true, error } — el front
+   conmuta automáticamente a la vista restablecer contraseña. */
 router.post('/login', function (req, res) {
   const body = req.body || {};
   const email = String(body.email == null ? '' : body.email).trim().toLowerCase();
@@ -426,7 +456,13 @@ router.post('/login', function (req, res) {
   }
 
   const usuario = db.getOne('SELECT * FROM usuarios WHERE email = ?', [email]);
-  if (usuario && Number(usuario.intentos_fallidos || 0) >= 3) {
+
+  /* Sin fila: no hay bloqueo posible (el contador vive en la fila) */
+  if (!usuario) {
+    fail(401, 'Usuario no registrado o contraseña incorrecta.');
+  }
+
+  if (Number(usuario.intentos_fallidos || 0) >= 3) {
     /* Bloqueo vigente: ni la contraseña correcta entra (fue probada en un
        contexto sospechado); recupera el acceso por reset-password, que
        hace intentos_fallidos = 0. Respuesta directa con flag de nivel
@@ -439,26 +475,22 @@ router.post('/login', function (req, res) {
       }
     });
   }
-  if (!usuario || !verificarPassword(password, usuario.password_hash)) {
-    if (usuario) {
-      const intentos = Number(usuario.intentos_fallidos || 0) + 1;
-      db.run('UPDATE usuarios SET intentos_fallidos = ? WHERE id = ?', [intentos, usuario.id]);
+  if (!verificarPassword(password, usuario.password_hash)) {
+    const intentos = Number(usuario.intentos_fallidos || 0) + 1;
+    db.run('UPDATE usuarios SET intentos_fallidos = ? WHERE id = ?', [intentos, usuario.id]);
 
-      if (intentos >= 3) {
-        /* Respuesta directa (sin throw): el cuerpo lleva el flag de nivel
-           superior que el front usa para conmutar a "restablecer". */
-        return res.status(403).json({
-          forceReset: true,
-          error: {
-            codigo: 'BLOQUEO_INTENTOS',
-            mensaje: 'Demasiados intentos fallidos. Debes restablecer tu contraseña.'
-          }
-        });
-      }
-      fail(401, 'Credenciales incorrectas. Intentos restantes: ' + (3 - intentos));
+    if (intentos >= 3) {
+      /* Respuesta directa (sin throw): el cuerpo lleva el flag de nivel
+         superior que el front usa para conmutar a "restablecer". */
+      return res.status(403).json({
+        forceReset: true,
+        error: {
+          codigo: 'BLOQUEO_INTENTOS',
+          mensaje: 'Demasiados intentos fallidos. Debes restablecer tu contraseña.'
+        }
+      });
     }
-    /* Sin enumerar cuentas: mismo mensaje con o sin fila */
-    fail(401, 'Credenciales incorrectas. Verificá tu email y contraseña.');
+    fail(401, 'Credenciales incorrectas. Intentos restantes: ' + (3 - intentos));
   }
 
   /* Login OK: contador a 0 y token fresco */

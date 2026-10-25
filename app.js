@@ -2694,6 +2694,10 @@ function iniciarCamara() {
       }
 
       var msg = (r.cuerpo && r.cuerpo.error && r.cuerpo.error.mensaje) || ('Error HTTP ' + r.status);
+      /* No registrado (Fase 4b): la pestaña destino es Registro */
+      if (r.status === 401 && /no registrado/i.test(msg)) {
+        msg += ' ¿No tenés cuenta? Cargá tus datos en la pestaña Registrarse.';
+      }
       setEstado(msg, true);
     });
   }
@@ -2790,13 +2794,26 @@ function iniciarCamara() {
       if (!email) { setEstado('Ingresá el email de la cuenta', true); return; }
       var creado = null;
       var fin = await conEnvio(btn, async function () {
-        creado = await api('/auth/register', {
+        var r = await apiCrudo('/auth/register', {
           method: 'POST',
           body: { metodo: 'email', email: email, password: clave,
                   nombre: nombre, apellido: apellido, nombreTaller: taller }
         });
+        creado = r.cuerpo;
+        if (r.status >= 400) {
+          var msgErr = (creado && creado.error && creado.error.mensaje) || ('Error HTTP ' + r.status);
+          if (r.status === 409) {
+            /* Ya registrado (Fase 4b): en el contenedor de error del campo,
+               para que el operador sepa que debe ir a la pestaña Ingresar */
+            setHint('#reg-email-estado', false, msgErr);
+            setEstado(msgErr);
+          } else {
+            toast(msgErr, true);
+          }
+          creado = null;
+        }
       });
-      if (!fin || !creado || !creado.token) return;   /* el toast ya avisó */
+      if (!fin || !creado || !creado.token) return;   /* el aviso ya quedó */
       registroPorOtp = false;
       claveRegistro = '';
       guardarSesion(creado.token, creado.usuario || null);
@@ -2817,11 +2834,24 @@ function iniciarCamara() {
     }
     var resp = null;
     fin = await conEnvio(btn, async function () {
-      resp = await api('/auth/register', {
+      var r = await apiCrudo('/auth/register', {
         method: 'POST',
         body: { metodo: 'telefono', telefono: tel, password: clave,
                 nombre: nombre, apellido: apellido, nombreTaller: taller }
       });
+      resp = r.cuerpo;
+      if (r.status >= 400) {
+        var msgErr = (resp && resp.error && resp.error.mensaje) || ('Error HTTP ' + r.status);
+        if (r.status === 409) {
+          /* Ya registrado (Fase 4b): en el contenedor de error del campo —
+             el operador va directo a la pestaña Ingresar (OTP) */
+          setHint('#reg-tel-estado', false, msgErr);
+          setEstado(msgErr);
+        } else {
+          toast(msgErr, true);
+        }
+        resp = null;
+      }
     });
     if (!fin || !resp || !resp.necesitaVerificacion) return;
     registroPorOtp = true;

@@ -113,9 +113,19 @@ function migrarUsuariosFase2() {
     }
   });
 
-  /* índices únicos (IF NOT EXISTS → idempotentes; admiten NULL repetidos) */
-  exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_usuarios_telefono ON usuarios (telefono)');
-  exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_usuarios_email ON usuarios (email)');
+  /* índices únicos (IF NOT EXISTS → idempotentes; admiten NULL repetidos).
+     Si una base legada ya trae emails/teléfonos duplicados, el CREATE
+     UNIQUE INDEX fallaría y tiraría abajo el arranque: se registra el
+     aviso y la app arranca igual (los check-then-insert de auth siguen
+       protegiendo; limpiar duplicados antes de forzar el índice). */
+  ['telefono', 'email'].forEach(function (col) {
+    try {
+      exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_usuarios_' + col + ' ON usuarios (' + col + ')');
+    } catch (e) {
+      console.log('[db][migracion] idx_usuarios_' + col + ' NO creado: la base ya tiene '
+        + col + ' duplicados — deduplicar y reintentar (' + e.message + ')');
+    }
+  });
 }
 
 function nuevoId() {
