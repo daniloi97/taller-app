@@ -66,7 +66,11 @@
       <!-- Camino B: WhatsApp + OTP (dos pasos, Fase 1) -->
       <div id="login-paso1" hidden>
         <label class="lb" for="login-tel">Número de WhatsApp</label>
-        <input class="inp mono" id="login-tel" inputmode="tel" autocomplete="tel" placeholder="5491112345678">
+        <div class="tel-wrap">
+          <span class="tel-prefijo" aria-hidden="true">+54 9</span>
+          <input class="inp mono" id="login-tel" inputmode="numeric" maxlength="10" autocomplete="tel-national" placeholder="1123456789">
+        </div>
+        <div class="help-tel">Ingresá tu celular con código de área, sin el 0 y sin el 15 (ej: 1123456789)</div>
         <button class="btn primary full mt10" id="login-enviar" data-act="login-enviar">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
           Enviar código por WhatsApp
@@ -104,33 +108,49 @@
       </div>
 
       <div class="mt10">
+        <label class="lb" for="reg-nombre">Nombre <span class="muted small">*</span></label>
+        <input class="inp" id="reg-nombre" maxlength="80" placeholder="María" autocomplete="given-name">
+      </div>
+
+      <div class="mt10">
+        <label class="lb" for="reg-apellido">Apellido <span class="muted small">*</span></label>
+        <input class="inp" id="reg-apellido" maxlength="80" placeholder="González" autocomplete="family-name">
+      </div>
+
+      <div class="mt10">
         <label class="lb" for="reg-taller">Nombre de tu taller</label>
         <input class="inp" id="reg-taller" maxlength="120" placeholder="Taller Central" autocomplete="organization">
       </div>
 
       <div id="reg-campo-email" class="mt10">
-        <label class="lb" for="reg-email">Email</label>
+        <label class="lb" for="reg-email">Email <span class="muted small">*</span></label>
         <input class="inp" id="reg-email" type="email" autocomplete="email" placeholder="taller@correo.com">
+        <div class="pw-hint" id="reg-email-estado"></div>
       </div>
 
       <div id="reg-campo-telefono" class="mt10" hidden>
-        <label class="lb" for="reg-tel">Número de WhatsApp</label>
-        <input class="inp mono" id="reg-tel" inputmode="tel" autocomplete="tel" placeholder="5491112345678">
+        <label class="lb" for="reg-tel">Celular (WhatsApp) <span class="muted small">*</span></label>
+        <div class="tel-wrap">
+          <span class="tel-prefijo" aria-hidden="true">+54 9</span>
+          <input class="inp mono" id="reg-tel" inputmode="numeric" maxlength="10" autocomplete="tel-national" placeholder="1123456789">
+        </div>
+        <div class="help-tel">Ingresá tu celular con código de área, sin el 0 y sin el 15 (ej: 1123456789)</div>
+        <div class="pw-hint" id="reg-tel-estado"></div>
       </div>
 
       <div class="mt10">
-        <label class="lb" for="reg-clave">Contraseña <span class="muted small">(mínimo 6)</span></label>
+        <label class="lb" for="reg-password">Contraseña <span class="muted small">(mínimo 6)</span></label>
         <div class="pw-wrap">
-          <input class="inp" id="reg-clave" type="password" autocomplete="new-password" placeholder="••••••">
-          <button type="button" class="btn-toggle-password" data-target="reg-clave" aria-label="Mostrar contraseña" tabindex="-1">
+          <input class="inp" id="reg-password" type="password" autocomplete="new-password" placeholder="••••••">
+          <button type="button" class="btn-toggle-password" data-target="reg-password" aria-label="Mostrar contraseña" tabindex="-1">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
           </button>
         </div>
-        <div class="pw-hint" id="reg-clave-estado"></div>
+        <div class="pw-hint" id="reg-password-estado"></div>
       </div>
 
       <div class="mt10">
-        <label class="lb" for="reg-password-confirm">Repetir contraseña</label>
+        <label class="lb" for="reg-password-confirm">Repetir contraseña <span class="muted small">*</span></label>
         <div class="pw-wrap">
           <input class="inp" id="reg-password-confirm" type="password" autocomplete="new-password" placeholder="••••••">
           <button type="button" class="btn-toggle-password" data-target="reg-password-confirm" aria-label="Mostrar contraseña" tabindex="-1">
@@ -161,7 +181,11 @@
 
       <div id="reset-campos-otp" class="mt10">
         <label class="lb" for="reset-tel">Número de WhatsApp</label>
-        <input class="inp mono" id="reset-tel" inputmode="tel" placeholder="5491112345678">
+        <div class="tel-wrap">
+          <span class="tel-prefijo" aria-hidden="true">+54 9</span>
+          <input class="inp mono" id="reset-tel" inputmode="numeric" maxlength="10" autocomplete="tel-national" placeholder="1123456789">
+        </div>
+        <div class="help-tel">Ingresá tu celular con código de área, sin el 0 y sin el 15 (ej: 1123456789)</div>
         <button class="btn full mt10" id="reset-otp-enviar" data-act="reset-otp-enviar">Enviar código al WhatsApp</button>
         <div class="mt10">
           <label class="lb" for="reset-otp">Código recibido</label>
@@ -562,6 +586,15 @@
     </div>
     <form class="sheet-bd" id="pfForm">
       <div class="form-grid">
+        <!-- Identidad personal (Fase 4): consultable y editable siempre -->
+        <div>
+          <label class="lb" for="pf-nombre">Nombre</label>
+          <input class="inp" id="pf-nombre" maxlength="80" placeholder="María" autocomplete="given-name">
+        </div>
+        <div>
+          <label class="lb" for="pf-apellido">Apellido</label>
+          <input class="inp" id="pf-apellido" maxlength="80" placeholder="González" autocomplete="family-name">
+        </div>
         <div class="span-2">
           <label class="lb" for="pf-email">Email de recuperación</label>
           <input class="inp" id="pf-email" type="email" autocomplete="email" placeholder="taller@correo.com">
@@ -571,9 +604,14 @@
           <div id="pf-aviso-email" class="aviso-inline mt6">⚠️ Carga tu email para habilitar el cambio y recuperación de contraseña</div>
           <div class="muted small mt6">🔑 Sin email la recuperación por token no está disponible y los OTP quedan limitados a 2 por mes.</div>
         </div>
-        <div>
+        <div class="span-2">
           <label class="lb" for="pf-tel">Teléfono (WhatsApp)</label>
-          <input class="inp mono" id="pf-tel" inputmode="tel" placeholder="5491112345678">
+          <div class="tel-wrap">
+            <span class="tel-prefijo" aria-hidden="true">+54 9</span>
+            <input class="inp mono" id="pf-tel" inputmode="numeric" maxlength="10" autocomplete="tel-national" placeholder="1123456789">
+          </div>
+          <div class="help-tel">Ingresá tu celular con código de área, sin el 0 y sin el 15 (ej: 1123456789)</div>
+          <div class="pw-hint" id="pf-tel-estado"></div>
         </div>
         <div>
           <label class="lb" for="pf-taller">Nombre del taller</label>

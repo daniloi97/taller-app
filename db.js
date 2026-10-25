@@ -86,9 +86,10 @@ ejecutarSchema();
 /* Migración ADITIVA para bases anteriores (idempotente): ALTER TABLE sólo si
    falta la columna, inspeccionando antes PRAGMA table_info. Con esto la
    tabla `usuarios` de la Fase 1 (teléfono + OTP) gana sin perder datos los
-   campos de la Fase 2: email, password_hash, cuota de OTP y bloqueo de
-   intentos de login. NOTA: ADD COLUMN con DEFAULT (constante) es válido en
-   SQLite; CURRENT_DATE se deja NULL y la lógica de cuota lo trata como
+   campos de la Fase 2 (email, password_hash, cuota de OTP y bloqueo de
+   intentos) y de la Fase 4 (nombre/apellido, identidad personal).
+   NOTA: ADD COLUMN con DEFAULT (constante) es válido en SQLite;
+   CURRENT_DATE se deja NULL y la lógica de cuota lo trata como
    "primera vez este mes". */
 function migrarUsuariosFase2() {
   const cols = selectAll('PRAGMA table_info(usuarios)');
@@ -99,6 +100,8 @@ function migrarUsuariosFase2() {
   const campos = {
     email:             'ALTER TABLE usuarios ADD COLUMN email VARCHAR(140)',
     password_hash:     'ALTER TABLE usuarios ADD COLUMN password_hash VARCHAR(255)',
+    nombre:            'ALTER TABLE usuarios ADD COLUMN nombre VARCHAR(80)',
+    apellido:          'ALTER TABLE usuarios ADD COLUMN apellido VARCHAR(80)',
     otp_conteo_mes:    'ALTER TABLE usuarios ADD COLUMN otp_conteo_mes INTEGER DEFAULT 0',
     otp_ultimo_reset:  'ALTER TABLE usuarios ADD COLUMN otp_ultimo_reset DATE',
     intentos_fallidos: 'ALTER TABLE usuarios ADD COLUMN intentos_fallidos INTEGER DEFAULT 0'
@@ -106,7 +109,7 @@ function migrarUsuariosFase2() {
   Object.keys(campos).forEach(function (col) {
     if (!presentes[col]) {
       exec(campos[col]);
-      console.log('[db][migracion] usuarios.' + col + ' agregada (Fase 2 de auth)');
+      console.log('[db][migracion] usuarios.' + col + ' agregada (migración de auth)');
     }
   });
 

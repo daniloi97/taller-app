@@ -1,6 +1,7 @@
 ﻿/* ============================================================================
    routes/auth.js — /api/v1/auth (Fase 2: login dual + perfil + cuotas;
-   Fase 3: confirmación de contraseña + cambio por enlace desde el perfil)
+   Fase 3: cambio por enlace desde el perfil · Fase 4: identidad personal
+   nombre/apellido + teléfono argentino 10 dígitos +54 9)
 
    ARQUITECTURA DE LA PANTALLA DE BIENVENIDA (dual):
      · Registro:    email + contraseña, o teléfono + OTP + contraseña.
@@ -185,11 +186,21 @@ function usuarioPublico(fila) {
     id: fila.id,
     telefono: fila.telefono || null,
     email: fila.email || null,
+    nombre: fila.nombre || null,
+    apellido: fila.apellido || null,
     nombreTaller: fila.nombre_taller || null,
     rol: fila.rol || 'admin',
     cuotaOtp: { usados: Number(fila.otp_conteo_mes || 0), limite: OTP_CUOTA_MENSUAL },
     createdAt: fila.created_at
   };
+}
+
+/* Datos personales obligatorios del registro (Fase 4): nombre y apellido.
+   Se validan ANTES de crear la fila o gastar un OTP. */
+const ID_PERSONAL_MAX = 80;
+function textoPersonalValido(v) {
+  const t = String(v == null ? '' : v).trim();
+  return t.length >= 1 && t.length <= ID_PERSONAL_MAX;
 }
 
 function usuarioPorId(id) {
@@ -272,6 +283,14 @@ router.post('/verify-otp', function (req, res) {
   const nombreTaller = String(body.nombreTaller == null ? '' : body.nombreTaller).trim();
   if (nombreTaller.length > 120) fail(400, 'El nombre del taller excede los 120 caracteres');
 
+  /* Datos personales (Fase 4): opcionales aquí — el flujo legado de login
+     por OTP los manda vacíos; el registro dual los exige en /register. */
+  const nombre = String(body.nombre == null ? '' : body.nombre).trim();
+  const apellido = String(body.apellido == null ? '' : body.apellido).trim();
+  if ((nombre && !textoPersonalValido(nombre)) || (apellido && !textoPersonalValido(apellido))) {
+    fail(400, 'Nombre y apellido admiten hasta ' + ID_PERSONAL_MAX + ' caracteres');
+  }
+
   /* Contraseña opcional: se valida ANTES de gastar el código (one-shot),
      para no quemarlo por un typo en el campo. */
   let password = body.password;
@@ -289,20 +308,22 @@ router.post('/verify-otp', function (req, res) {
   db.tx(function () {
     const previo = db.getOne('SELECT id FROM usuarios WHERE telefono = ?', [tel]);
     if (previo) {
-      if (nombreTaller || password) {
+      if (nombreTaller || password || nombre || apellido) {
         db.run(
-          'UPDATE usuarios SET nombre_taller = CASE WHEN ? <> \'\' THEN ? ELSE nombre_taller END, ' +
+          'UPDATE usuarios SET nombre = COALESCE(?, nombre), apellido = COALESCE(?, apellido), ' +
+          'nombre_taller = CASE WHEN ? <> \'\' THEN ? ELSE nombre_taller END, ' +
           'password_hash = COALESCE(?, password_hash), intentos_fallidos = 0 WHERE id = ?',
-          [nombreTaller, nombreTaller, password ? hashPassword(password) : null, previo.id]
+          [nombre || null, apellido || null, nombreTaller, nombreTaller,
+           password ? hashPassword(password) : null, previo.id]
         );
       } else {
         db.run('UPDATE usuarios SET intentos_fallidos = 0 WHERE id = ?', [previo.id]);
       }
     } else {
       db.run(
-        'INSERT INTO usuarios (id, telefono, nombre_taller, rol, password_hash, ' +
-        'otp_conteo_mes, otp_ultimo_reset) VALUES (?, ?, ?, ?, ?, ?, CURRENT_DATE)',
-        [idNuevo, tel, nombreTaller || null, 'admin',
+        'INSERT INTO usuarios (id, telefono, nombre, apellido, nombre_taller, rol, password_hash, ' +
+        'otp_conteo_mes, otp_ultimo_reset) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_DATE)',
+        [idNuevo, tel, nombre || null, apellido || null, nombreTaller || null, 'admin',
          password ? hashPassword(password) : null, guarda.usosMes || 1]
       );
     }
@@ -326,10 +347,15 @@ router.post('/register', function (req, res) {
   const password = String(body.password == null ? '' : body.password);
   const nombreTaller = String(body.nombreTaller == null ? '' : body.nombreTaller).trim();
 
+  /* Datos personales OBLIGATORIOS en el registro (Fase 4) */
+  const nombre = String(body.nombre == null ? '' : body.nombre).trim();
+  const apellido = String(body.apellido == null ? '' : body.apellido).trim();
+  if (!textoPersonalValido(nombre)) fail(400, 'El nombre es obligatorio (máx. ' + ID_PERSONAL_MAX + ' caracteres)');
+  if (!textoPersonalValido(apellido)) fail(400, 'El apellido es obligatorio (máx. ' + ID_PERSONAL_MAX + ' caracteres)');
+  if (nombreTaller.length > 120) fail(400, 'El nombre del taller excede los 120 caracteres');
   if (!passwordValido(password)) {
     fail(400, 'La contraseña debe tener al menos ' + PASSWORD_MIN + ' caracteres');
   }
-  if (nombreTaller.length > 120) fail(400, 'El nombre del taller excede los 120 caracteres');
 
   if (metodo === 'email') {
     const email = String(body.email == null ? '' : body.email).trim().toLowerCase();
@@ -341,9 +367,9 @@ router.post('/register', function (req, res) {
 
     const id = db.nuevoId();
     db.run(
-      'INSERT INTO usuarios (id, email, password_hash, nombre_taller, rol, ' +
-      'otp_conteo_mes) VALUES (?, ?, ?, ?, ?, 0)',
-      [id, email, hashPassword(password), nombreTaller || null, 'admin']
+      'INSERT INTO usuarios (id, email, password_hash, nombre, apellido, nombre_taller, rol, ' +
+      'otp_conteo_mes) VALUES (?, ?, ?, ?, ?, ?, ?, 0)',
+      [id, email, hashPassword(password), nombre, apellido, nombreTaller || null, 'admin']
     );
     const fila = usuarioPorId(id);
     return res.status(201).json({ token: firmarToken(fila), usuario: usuarioPublico(fila) });
@@ -581,13 +607,26 @@ router.put('/profile', proteger, function (req, res) {
     }
   }
 
-  if (body.nombreTaller !== undefined) {
-    const nombre = String(body.nombreTaller == null ? '' : body.nombreTaller).trim();
-    if (nombre.length > 120) fail(400, 'El nombre del taller excede los 120 caracteres');
-    sets.push('nombre_taller = ?'); params.push(nombre || null);
+  if (body.nombre !== undefined || body.apellido !== undefined) {
+    /* Identidad personal (Fase 4): editable desde el perfil. Se intenta
+       actualizar en un solo SET cuando iliengo ambos; si uno viene solo,
+       sólo ese campo viaja (vacío no borra por accidente). */
+    const nombre = String(body.nombre == null ? '' : body.nombre).trim();
+    const apellido = String(body.apellido == null ? '' : body.apellido).trim();
+    if ((nombre && !textoPersonalValido(nombre)) || (apellido && !textoPersonalValido(apellido))) {
+      fail(400, 'Nombre y apellido admiten hasta ' + ID_PERSONAL_MAX + ' caracteres');
+    }
+    if (nombre) { sets.push('nombre = ?'); params.push(nombre); }
+    if (apellido) { sets.push('apellido = ?'); params.push(apellido); }
   }
 
-  if (!sets.length) fail(400, 'No hay cambios que guardar: enviá email, telefono o nombreTaller');
+  if (body.nombreTaller !== undefined) {
+    const nombreTaller = String(body.nombreTaller == null ? '' : body.nombreTaller).trim();
+    if (nombreTaller.length > 120) fail(400, 'El nombre del taller excede los 120 caracteres');
+    sets.push('nombre_taller = ?'); params.push(nombreTaller || null);
+  }
+
+  if (!sets.length) fail(400, 'No hay cambios que guardar: enviá nombre, apellido, email, telefono o nombreTaller');
 
   db.run('UPDATE usuarios SET ' + sets.join(', ') + ' WHERE id = ?', params.concat([fila.id]));
 
@@ -606,7 +645,8 @@ router.put('/profile', proteger, function (req, res) {
    un token temporal de 15 min (mismo store resetsEmail que /reset-password
    via 'token') y "envía" el correo con el enlace de restablecimiento:
      {FRONT_URL}#reset-password?token=XYZ
-   Mock: consola del server + dev.enlace en desarrollo (SMTP real: Fase 4). */
+   Mock: consola del server + dev.enlace en desarrollo (SMTP real: fase de
+   producción). */
 router.post('/request-password-reset-email', proteger, function (req, res) {
   const fila = usuarioPorId(req.usuario.sub);
   if (!fila) fail(401, 'La cuenta del token ya no existe: iniciá sesión de nuevo');

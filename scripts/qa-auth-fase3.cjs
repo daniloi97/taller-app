@@ -45,12 +45,12 @@ async function main() {
   /* ---------------------------------------------------- 1) cuenta de regalo */
   let r = await req('POST', '/auth/register', {
     metodo: 'email', email: 'qa.fase3@taller.com',
-    password: 'clave123', nombreTaller: 'QA Fase3 Taller'
+    password: 'clave123', nombre: 'QA', apellido: 'Fase Tres', nombreTaller: 'QA Fase3 Taller'
   });
   chequear('register email → 201 + token (PASSWORD_MIN=6 permite clave de 8)', r.status === 201 && Boolean(r.j.token), r.j);
   const tokenUsuario = r.j.token;
 
-  r = await req('POST', '/auth/register', { metodo: 'email', email: 'qa.f3corta@taller.com', password: 'corta' });
+  r = await req('POST', '/auth/register', { metodo: 'email', email: 'qa.f3corta@taller.com', password: 'corta', nombre: 'QA', apellido: 'Corta' });
   chequear('register con contraseña de 5 → 400 (mínimo 6)', r.status === 400, r.j);
 
   /* --------------------------------------------- 2) request SIN sesión → 401 */
@@ -62,7 +62,7 @@ async function main() {
 
   /* ------------------------------------------ 3) request con sesión sin email */
   const tel = '5499000000031';
-  r = await req('POST', '/auth/register', { metodo: 'telefono', telefono: tel, password: 'clave123', nombreTaller: 'QA OTP Sin Email' });
+  r = await req('POST', '/auth/register', { metodo: 'telefono', telefono: tel, password: 'clave123', nombre: 'QA', apellido: 'Sin Email', nombreTaller: 'QA OTP Sin Email' });
   const otp1 = r.j.dev && r.j.dev.otp;
   r = await req('POST', '/auth/verify-otp', { telefono: tel, otp: otp1, password: 'clave123' });
   chequear('cuenta OTP-only registrada y verificada', r.status === 200 && Boolean(r.j.token), r.j);

@@ -168,7 +168,8 @@ CREATE TABLE IF NOT EXISTS repuestos_orden (
 CREATE INDEX IF NOT EXISTS idx_repuestos_orden ON repuestos_orden (orden_id);
 
 -- ---------------------------------------------------------------------------
--- 7) USUARIOS — acceso del taller (Fase 2: login dual + perfil + cuotas).
+-- 7) USUARIOS — acceso del taller (Fase 2: login dual + perfil + cuotas;
+--    Fase 4: identidad personal nombre/apellido).
 --    Identidad DUAL: email + contraseña, o teléfono con OTP de WhatsApp.
 --    El hash (scrypt, formato "scrypt$<salt>$<dk>") vive en password_hash,
 --    JAMÁS en texto claro. otp_conteo_mes / otp_ultimo_reset implementan la
@@ -178,12 +179,16 @@ CREATE INDEX IF NOT EXISTS idx_repuestos_orden ON repuestos_orden (orden_id);
 --    autónoma: SIN FK (el JWT lleva el id). Sin teléfono la cuenta opera
 --    pura por email; sin email es OTP-only (el banner pide vincularlo desde
 --    el perfil para poder recuperar la cuenta al agotar los OTP).
+--    nombre / apellido (Fase 4): identidad personal obligatoria en el
+--    registro y editable desde el perfil.
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS usuarios (
   id                VARCHAR(36)  NOT NULL,
   telefono          VARCHAR(30),
   email             VARCHAR(140),
   password_hash     VARCHAR(255),
+  nombre            VARCHAR(80),
+  apellido          VARCHAR(80),
   nombre_taller     VARCHAR(120),
   rol               VARCHAR(20)  DEFAULT 'admin',
   otp_conteo_mes    INTEGER      DEFAULT 0,

@@ -1330,6 +1330,17 @@ select.inp{
 .pw-hint.err{color:#dc2626;font-weight:600}
 .pw-hint.ok{color:#16a34a;font-weight:600}
 
+/* Fase 4 · teléfono argentino (+54 9): el prefijo de país es NO editable
+   y vive dibujado dentro del input; el campo acepta sólo 10 dígitos. */
+.tel-wrap{position:relative}
+.tel-wrap .inp{padding-left:64px}
+.tel-prefijo{
+  position:absolute;left:10px;top:50%;transform:translateY(-50%);
+  font-size:12.5px;color:var(--muted);font-weight:600;
+  pointer-events:none;user-select:none;white-space:nowrap;
+}
+.help-tel{font-size:11.5px;color:var(--muted);margin-top:2px;text-align:left}
+
 /* Perfil (Fase 3): badge de email vinculado y aviso si falta */
 .badge-verde{
   display:inline-flex;align-items:center;gap:4px;

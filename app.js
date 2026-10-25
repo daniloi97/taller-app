@@ -2365,7 +2365,7 @@ function iniciarCamara() {
     });
   });
   /* Enter en el registro y en el restablecimiento */
-  ['#reg-tel', '#reg-clave'].forEach(function (sel) {
+  ['#reg-tel', '#reg-password', '#reg-nombre', '#reg-apellido'].forEach(function (sel) {
     $(sel).addEventListener('keydown', function (ev) {
       if (ev.key === 'Enter') { ev.preventDefault(); ACCIONES['registrar']($('#reg-crear')); }
     });
@@ -2393,6 +2393,7 @@ function iniciarCamara() {
     r.addEventListener('change', function () {
       var checked = document.querySelector('input[name="reg-modo"]:checked');
       if (checked) toggleModoRegistro(checked.value);
+      validarFormRegistro();   /* el campo requerido cambia: refrescar hints */
     });
   });
   $$('input[name="reset-modo"]').forEach(function (r) {
@@ -2402,17 +2403,30 @@ function iniciarCamara() {
     });
   });
 
-  /* Validación en vivo del registro y de la vista de reset (Fase 3):
-     cada 'input' en cualquier de los dos campos refresca hints + botón */
-  ['#reg-clave', '#reg-password-confirm'].forEach(function (sel) {
-    $(sel).addEventListener('input', validarClaveRegistro);
+  /* Validación en vivo del registro (Fase 4): cada 'input' en cualquier
+     campo obligatorio refresca hints + estado del botón Crear */
+  ['#reg-password', '#reg-password-confirm', '#reg-nombre', '#reg-apellido',
+   '#reg-email', '#reg-tel'].forEach(function (sel) {
+    $(sel).addEventListener('input', validarFormRegistro);
+  });
+
+  /* Fase 4: los inputs de teléfono aceptan SOLO dígitos (máx. 10) — corrige
+     pegado de texto con signos; y al cambiar el método de contacto también
+     se refresca la validación (el campo requerido cambia). */
+  ['#login-tel', '#reg-tel', '#reset-tel', '#pf-tel'].forEach(function (sel) {
+    var inp = $(sel);
+    if (!inp) return;
+    inp.addEventListener('input', function () {
+      var limpio = limpiarTelefonoLocal(inp.value);
+      if (limpio !== inp.value) inp.value = limpio;
+    });
   });
   ['#reset-new-password', '#reset-new-password-confirm'].forEach(function (sel) {
     $(sel).addEventListener('input', validarClaveResetVR);
   });
 
   /* Enter en los formularios nuevos (Fase 3) */
-  ['#reg-clave', '#reg-password-confirm'].forEach(function (sel) {
+  ['#reg-password', '#reg-password-confirm'].forEach(function (sel) {
     $(sel).addEventListener('keydown', function (ev) {
       if (ev.key === 'Enter') { ev.preventDefault(); ACCIONES['registrar']($('#reg-crear')); }
     });
@@ -2540,13 +2554,14 @@ function iniciarCamara() {
     /* Logout / vencimiento: formularios limpios (también los otros paneles,
        para que nada quede precargado entre sesiones de la misma máquina) */
     ['login-email', 'login-clave', 'login-tel', 'login-otp', 'login-taller',
-     'reg-taller', 'reg-email', 'reg-tel', 'reg-clave', 'reg-password-confirm',
+     'reg-taller', 'reg-email', 'reg-tel', 'reg-password', 'reg-password-confirm',
+     'reg-nombre', 'reg-apellido',
      'reset-tel', 'reset-otp', 'reset-clave-otp',
      'reset-email', 'reset-token', 'reset-clave-token'].forEach(function (id) {
       var campo = $('#' + id);
       if (campo) campo.value = '';
     });
-    validarClaveRegistro();      /* resetea hints + estado del botón Crear */
+    validarFormRegistro();      /* resetea hints + estado del botón Crear */
     var rEmail = $('#reg-modo-email');
     if (rEmail) rEmail.checked = true;
     toggleModoRegistro('email');
@@ -2685,9 +2700,10 @@ function iniciarCamara() {
 
   /* Paso 1 (WhatsApp OTP) → pedir código. ConEnvio desactiva el botón. */
   async function loginEnviar(btn) {
-    var tel = String($('#login-tel').value || '').replace(/[^\d+]/g, '');
-    if (tel.length < 8 || tel.length > 15) {
-      toast('Número inválido: ingresá tu WhatsApp en formato internacional, p.ej. 5491112345678', true);
+    /* Teléfono AR (Fase 4): 10 dígitos locales → el API recibe 549 + dígitos */
+    var tel = normalizarTelefonoArg($('#login-tel').value);
+    if (!tel) {
+      toast('Número inválido: necesitamos 10 dígitos con código de área, sin el 0 y sin el 15 (ej: 1123456789)', true);
       return;
     }
     telefonoLogin = tel;
@@ -2720,7 +2736,12 @@ function iniciarCamara() {
       ? String($('#reg-taller').value || '').trim()
       : String($('#login-taller').value || '').trim();
     var cuerpo = { telefono: telefonoLogin, otp: otp, nombreTaller: nombreTaller };
-    if (registroPorOtp && claveRegistro) cuerpo.password = claveRegistro;
+    if (registroPorOtp) {
+      /* El registro por teléfono completa los datos personales al verificar */
+      cuerpo.password = claveRegistro;
+      cuerpo.nombre = String($('#reg-nombre').value || '').trim();
+      cuerpo.apellido = String($('#reg-apellido').value || '').trim();
+    }
 
     var verificado = null;
     var ok = await conEnvio(btn, async function () {
@@ -2755,8 +2776,13 @@ function iniciarCamara() {
     var radio = document.querySelector('input[name="reg-modo"]:checked');
     var modo = radio ? radio.value : 'email';
     var taller = String($('#reg-taller').value || '').trim();
-    var clave = String($('#reg-clave').value || '');
+    var clave = String($('#reg-password').value || '');
+    /* Datos personales obligatorios (Fase 4) */
+    var nombre = String($('#reg-nombre').value || '').trim();
+    var apellido = String($('#reg-apellido').value || '').trim();
 
+    if (!nombre) { setEstado('Ingresá tu nombre', true); return; }
+    if (!apellido) { setEstado('Ingresá tu apellido', true); return; }
     if (clave.length < PASSWORD_MIN_FRONT) { setEstado('La contraseña debe tener al menos ' + PASSWORD_MIN_FRONT + ' caracteres', true); return; }
 
     if (modo === 'email') {
@@ -2766,7 +2792,8 @@ function iniciarCamara() {
       var fin = await conEnvio(btn, async function () {
         creado = await api('/auth/register', {
           method: 'POST',
-          body: { metodo: 'email', email: email, password: clave, nombreTaller: taller }
+          body: { metodo: 'email', email: email, password: clave,
+                  nombre: nombre, apellido: apellido, nombreTaller: taller }
         });
       });
       if (!fin || !creado || !creado.token) return;   /* el toast ya avisó */
@@ -2776,23 +2803,24 @@ function iniciarCamara() {
       mostrarSesionUI();
       mostrarApp();
       console.info('[auth] Token guardado y sesión iniciada');
-      var nombre = creado.usuario && creado.usuario.nombreTaller;
-      toast('Cuenta creada' + (nombre ? ' — ' + nombre : '') + ': ingresaste al taller');
+      var nombreT = creado.usuario && creado.usuario.nombreTaller;
+      toast('Cuenta creada' + (nombreT ? ' — ' + nombreT : '') + ': ingresaste al taller');
       arrancarDatos();
       return;
     }
 
-    /* Registro por teléfono: primero el código (propiedad), luego el paso 2 */
-    var tel = String($('#reg-tel').value || '').replace(/[^\d+]/g, '');
-    if (tel.length < 8 || tel.length > 15) {
-      setEstado('Número inválido: usá el formato internacional, p.ej. 5491112345678', true);
+    /* Registro por teléfono: 10 dígitos AR (sin repetir) → prefijo 549 */
+    var tel = normalizarTelefonoArg($('#reg-tel').value);
+    if (!tel) {
+      setEstado('Celular inválido: necesitamos 10 dígitos con código de área, sin el 0 y sin el 15 (ej: 1123456789)', true);
       return;
     }
     var resp = null;
     fin = await conEnvio(btn, async function () {
       resp = await api('/auth/register', {
         method: 'POST',
-        body: { metodo: 'telefono', telefono: tel, password: clave, nombreTaller: taller }
+        body: { metodo: 'telefono', telefono: tel, password: clave,
+                nombre: nombre, apellido: apellido, nombreTaller: taller }
       });
     });
     if (!fin || !resp || !resp.necesitaVerificacion) return;
@@ -2815,9 +2843,9 @@ function iniciarCamara() {
      en desarrollo el token arriba también como dato en línea).
      ------------------------------------------------------------------ */
   async function resetEnviarOtp(btn) {
-    var tel = String($('#reset-tel').value || '').replace(/[^\d+]/g, '');
-    if (tel.length < 8 || tel.length > 15) {
-      setEstado('Número inválido: usá el formato internacional, p.ej. 5491112345678', true);
+    var tel = normalizarTelefonoArg($('#reset-tel').value);
+    if (!tel) {
+      setEstado('Número inválido: necesitamos 10 dígitos con código de área, sin el 0 y sin el 15 (ej: 1123456789)', true);
       return;
     }
     var r = null;
@@ -2842,7 +2870,7 @@ function iniciarCamara() {
   }
 
   async function resetConfirmarOtp(btn) {
-    var tel = String($('#reset-tel').value || '').replace(/[^\d+]/g, '');
+    var tel = normalizarTelefonoArg($('#reset-tel').value);
     var otp = String($('#reset-otp').value || '').replace(/\D/g, '');
     var clave = String($('#reset-clave-otp').value || '');
     if (otp.length !== 6) { setEstado('Ingresá el código de 6 dígitos', true); return; }
@@ -2906,8 +2934,11 @@ function iniciarCamara() {
      ------------------------------------------------------------------ */
   async function abrirPerfil() {
     var u = usuarioSesion() || {};
+    /* Fase 4: identidad personal + teléfono en formato local (10 dígitos) */
+    $('#pf-nombre').value = u.nombre || '';
+    $('#pf-apellido').value = u.apellido || '';
     $('#pf-email').value = u.email || '';
-    $('#pf-tel').value = u.telefono || '';
+    $('#pf-tel').value = telefonoLocalDesdeGuardado(u.telefono);
     $('#pf-taller').value = u.nombreTaller || '';
     $('#pf-creada').textContent = u.createdAt ? String(u.createdAt).slice(0, 10) : '—';
     $('#pf-cuota').textContent = u.cuotaOtp ? (u.cuotaOtp.usados + '/' + u.cuotaOtp.limite) : '—';
@@ -2920,8 +2951,10 @@ function iniciarCamara() {
       var fresco = await api('/auth/profile');
       if (fresco && fresco.usuario) {
         var v = fresco.usuario;
+        $('#pf-nombre').value = v.nombre || '';
+        $('#pf-apellido').value = v.apellido || '';
         $('#pf-email').value = v.email || '';
-        $('#pf-tel').value = v.telefono || '';
+        $('#pf-tel').value = telefonoLocalDesdeGuardado(v.telefono);
         $('#pf-taller').value = v.nombreTaller || '';
         $('#pf-creada').textContent = v.createdAt ? String(v.createdAt).slice(0, 10) : '—';
         $('#pf-cuota').textContent = v.cuotaOtp ? (v.cuotaOtp.usados + '/' + v.cuotaOtp.limite) : '—';
@@ -2935,11 +2968,24 @@ function iniciarCamara() {
 
   async function guardarPerfil(btn) {
     var datos = {};
+    var nombre = String($('#pf-nombre').value || '').trim();
+    var apellido = String($('#pf-apellido').value || '').trim();
     var email = String($('#pf-email').value || '').trim();
-    var tel = String($('#pf-tel').value || '').replace(/[^\d+]/g, '');
+    var telLocal = limpiarTelefonoLocal($('#pf-tel').value);
     var taller = String($('#pf-taller').value || '').trim();
+    if (nombre) datos.nombre = nombre;
+    if (apellido) datos.apellido = apellido;
     if (email) datos.email = email;
-    if (tel) datos.telefono = tel;
+    /* Fase 4: 10 dígitos válidos → enviamos 549 + dígitos; vacío no toca;
+       si tipeó algo incompleto o repetido, lo rechazamos aquí para no
+       gastar un PUT que el servidor va a rechazar. */
+    if (telLocal) {
+      if (!telefonoLocalValido(telLocal)) {
+        toast('Celular inválido: 10 dígitos con código de área, sin el 0 y sin el 15 (ej: 1123456789)', true);
+        return;
+      }
+      datos.telefono = '549' + telLocal;
+    }
     if (taller) datos.nombreTaller = taller;
     if (!Object.keys(datos).length) { toast('No hay cambios: completá algún dato'); return; }
 
@@ -2957,6 +3003,41 @@ function iniciarCamara() {
      FASE 3 · confirmación de contraseña + cambio por enlace de email
      ================================================================== */
 
+  /* ==================================================================
+     FASE 4 · teléfono argentino (+54 9): prefijo fijo, 10 dígitos,
+     rechazo de dígitos repetidos y normalización para la API.
+     ================================================================== */
+  var TEL_DIGITOS = 10;
+  /* Números tramposos: todos los dígitos iguales (1111111111, 0000000000…) */
+  var TEL_REPETIDO_RE = /^(\d)\1{9}$/;
+  var EMAIL_RE_FRONT = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+  /* Sólo dígitos, máx. 10 (corre en cada 'input' — recorta pegado tipeado) */
+  function limpiarTelefonoLocal(valor) {
+    return String(valor || '').replace(/\D/g, '').slice(0, TEL_DIGITOS);
+  }
+
+  /* Reglas de validez: exactamente 10 dígitos y NO todos idénticos */
+  function telefonoLocalValido(valor) {
+    var d = limpiarTelefonoLocal(valor);
+    return d.length === TEL_DIGITOS && !TEL_REPETIDO_RE.test(d);
+  }
+
+  /* Normalización para la API: concatena el prefijo país+celular.
+     ej: 1123456789 → 5491123456789 (el formato que la API guarda). */
+  function normalizarTelefonoArg(valor) {
+    var d = limpiarTelefonoLocal(valor);
+    return d.length === TEL_DIGITOS ? '549' + d : '';
+  }
+
+  /* El número guardado por la API viene completo (549XXXXXXXXXX);
+     para el input mostramos el local de 10 dígitos si es de ese formato. */
+  function telefonoLocalDesdeGuardado(guardado) {
+    var t = String(guardado || '');
+    if (/^549\d{10}$/.test(t)) return t.slice(3);
+    return t.length === TEL_DIGITOS && !TEL_REPETIDO_RE.test(t) ? t : '';
+  }
+
   /* Hint de validación en vivo bajo un campo de contraseña:
      '' → neutro; err → rojo con mensaje; ok → verde "Correcto". */
   function setHint(sel, ok, err) {
@@ -2966,18 +3047,48 @@ function iniciarCamara() {
     el.className = 'pw-hint' + (err ? ' err' : (ok ? ' ok' : ''));
   }
 
-  /* Registro: clave ≥ 6 y ambas iguales → habilitan #reg-crear.
-     Corre en cada 'input' de ambos campos (tiempo real). */
-  function validarClaveRegistro() {
-    var a = $('#reg-clave'), b = $('#reg-password-confirm');
+  /* Registro (Fase 4): validación EN VIVO de TODO el formulario —
+     nombre/apellido obligatorios, contacto según método (email válido o
+     celular AR de 10 dígitos sin repetir), clave ≥ 6 y ambas iguales.
+     El botón "Crear cuenta" queda disabled hasta que todo pase. */
+  function validarFormRegistro() {
+    var a = $('#reg-password'), b = $('#reg-password-confirm');
     var crear = $('#reg-crear');
     if (!a || !b) return;
+    var radio = document.querySelector('input[name="reg-modo"]:checked');
+    var modo = radio ? radio.value : 'email';
+    var esEmail = modo !== 'telefono';
+
+    /* Datos personales obligatorios */
+    var okNombre = ($('#reg-nombre').value || '').trim().length >= 1;
+    var okApellido = ($('#reg-apellido').value || '').trim().length >= 1;
+
+    /* Claves */
     var clave = a.value;
     var okA = clave.length >= PASSWORD_MIN_FRONT;
-    setHint('#reg-clave-estado', okA, (!okA && clave.length) ? ('Mínimo ' + PASSWORD_MIN_FRONT + ' caracteres') : '');
+    setHint('#reg-password-estado', okA, (!okA && clave.length) ? ('Mínimo ' + PASSWORD_MIN_FRONT + ' caracteres') : '');
     var okB = okA && b.value.length > 0 && b.value === clave;
     setHint('#reg-confirm-estado', okB, (okA && b.value && b.value !== clave) ? 'Las contraseñas no coinciden' : '');
-    if (crear) crear.disabled = !(okA && okB);
+
+    /* Contacto según el método elegido (con aviso en línea si tipeó algo) */
+    var okContacto = false;
+    if (esEmail) {
+      var email = ($('#reg-email').value || '').trim();
+      okContacto = EMAIL_RE_FRONT.test(email);
+      setHint('#reg-email-estado', okContacto, (!okContacto && email) ? 'Formato de email inválido' : '');
+    } else {
+      var telLocal = $('#reg-tel').value;
+      okContacto = telefonoLocalValido(telLocal);
+      var avisoTel = '';
+      if (!okContacto && telLocal.length) {
+        avisoTel = TEL_REPETIDO_RE.test(telLocal)
+          ? 'El número no puede repetir el mismo dígito (ej: 1111111111)'
+          : 'Faltan dígitos: necesitamos exactamente 10';
+      }
+      setHint('#reg-tel-estado', okContacto, avisoTel);
+    }
+
+    if (crear) crear.disabled = !(okNombre && okApellido && okA && okB && okContacto);
   }
 
   /* Vista raíz #vista-reset-password: misma regla (≥6 + coinciden)
@@ -3193,6 +3304,6 @@ function iniciarCamara() {
   });
 
   /* Estado inicial de la validación en vivo del registro (botón disabled) */
-  validarClaveRegistro();
+  validarFormRegistro();
   validarClaveResetVR();
 })();

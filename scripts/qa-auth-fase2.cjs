@@ -96,19 +96,19 @@ async function main() {
   chequear('migración: la fila vieja quedó con intentos_fallidos = 0', mig.fila && Number(mig.fila.intentos_fallidos) === 0, mig.fila);
 
   /* ------------------------------------------- 3) registro dual: email --- */
-  let r = await req('POST', '/auth/register', { metodo: 'email', email: 'qa.fase2@taller.com', password: 'clave-qa-1234', nombreTaller: 'QA Fase2 Taller' });
+  let r = await req('POST', '/auth/register', { metodo: 'email', email: 'qa.fase2@taller.com', password: 'clave-qa-1234', nombre: 'QA', apellido: 'Fase Dos', nombreTaller: 'QA Fase2 Taller' });
   chequear('register email → 201 + token JWT', r.status === 201 && typeof r.j.token === 'string' && r.j.token.split('.').length === 3, r.j);
   chequear('register email → usuario con email y sin password_hash en la respuesta',
     r.j && r.j.usuario && r.j.usuario.email === 'qa.fase2@taller.com' && !('password_hash' in r.j.usuario), r.j);
   chequear('register email → cuota visible 0/2', r.j && r.j.usuario.cuotaOtp && r.j.usuario.cuotaOtp.usados === 0, r.j);
 
-  r = await req('POST', '/auth/register', { metodo: 'email', email: 'qa.fase2@taller.com', password: 'otra-clave-999' });
+  r = await req('POST', '/auth/register', { metodo: 'email', email: 'qa.fase2@taller.com', password: 'otra-clave-999', nombre: 'QA', apellido: 'Fase Dos' });
   chequear('register email duplicado → 409', r.status === 409, r.j);
 
-  r = await req('POST', '/auth/register', { metodo: 'email', email: 'corta@taller.com', password: '123' });
+  r = await req('POST', '/auth/register', { metodo: 'email', email: 'corta@taller.com', password: '123', nombre: 'QA', apellido: 'Corta' });
   chequear('register con contraseña corta → 400', r.status === 400, r.j);
 
-  r = await req('POST', '/auth/register', { metodo: 'palomita', email: 'x@taller.com', password: '12345678' });
+  r = await req('POST', '/auth/register', { metodo: 'palomita', email: 'x@taller.com', password: '12345678', nombre: 'QA', apellido: 'Palomita' });
   chequear('register con método inventado → 400', r.status === 400, r.j);
 
   /* ------------------------------------ 4) login email + bloqueo 3 errores */
@@ -150,7 +150,7 @@ async function main() {
     r.status === 200 && !r.j.dev, r.j);
 
   /* ------------------------------- 6) registro por teléfono + OTP (dual) */
-  r = await req('POST', '/auth/register', { metodo: 'telefono', telefono: '5497000000001', password: 'clave-otp-1234', nombreTaller: 'QA OTP Taller' });
+  r = await req('POST', '/auth/register', { metodo: 'telefono', telefono: '5497000000001', password: 'clave-otp-1234', nombre: 'QA', apellido: 'Otp Uno', nombreTaller: 'QA OTP Taller' });
   chequear('register teléfono → necesitaVerificacion', r.status === 200 && r.j.necesitaVerificacion === true, r.j);
   const otpReg = r.j.dev && r.j.dev.otp;
 
@@ -197,7 +197,7 @@ async function main() {
     r.j.usuario.nombreTaller === 'QA Fase2 Taller Editado', r.j);
 
   /* ------------------------------- 9) reset por OTP (el otro camino) */
-  r = await req('POST', '/auth/register', { metodo: 'telefono', telefono: '5497000000002', password: 'clave-otp-02aa', nombreTaller: 'QA OTP Dos' });
+  r = await req('POST', '/auth/register', { metodo: 'telefono', telefono: '5497000000002', password: 'clave-otp-02aa', nombre: 'QA', apellido: 'Otp Dos', nombreTaller: 'QA OTP Dos' });
   await espera(450);
   const otp2 = r.j.dev && r.j.dev.otp;
   r = await req('POST', '/auth/verify-otp', { telefono: '5497000000002', otp: otp2, password: 'clave-otp-02aa' });
