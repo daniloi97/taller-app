@@ -8,7 +8,7 @@
 ![SQLite](https://img.shields.io/badge/SQLite-3.30%2B-003B57?logo=sqlite&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-12%2B-4169E1?logo=postgresql&logoColor=white)
 ![ONNX Runtime](https://img.shields.io/badge/ONNX%20Runtime-Web-5C2D91)
-![Licencia](https://img.shields.io/badge/Licencia-MIT-green)
+[![Licencia](https://img.shields.io/badge/Licencia-MIT-green)](./LICENSE)
 ![Estado](https://img.shields.io/badge/Estado-pre--deploy%20·%20Fase%204b-blue)
 
 ---
@@ -71,6 +71,10 @@ WhatsApp** (válido 5 minutos, con protección anti-abuso). Contraseñas con
 mínimo de seguridad, bloqueo ante intentos fallidos, y recuperación de cuenta
 por enlace de email o por WhatsApp. Tu sesión viaja firmada (JWT) durante 30 días.
 
+> 📞 **Formato del celular (Argentina):** elegí el prefijo fijo **+54 9** y
+> escribí **10 dígitos: código de área y número, sin el 0 ni el 15**
+> (ej.: `1123456789`). Con eso el sistema te garantiza un OTP correcto.
+
 ### 🎨 Interfaz Responsiva e Inclusiva
 Diseñada **mobile-first**: se piensa para el mostrador del taller, escalando
 para tablet y escritorio. Modo claro y oscuro con conmutación persistente,
@@ -114,6 +118,10 @@ Serví el front con cualquier servidor estático, desde la carpeta del proyecto:
 npx serve .             # o python -m http.server 8800, lo que tengas a mano
 ```
 En `localhost` el front autodetecta la API (`http://localhost:3000/api/v1`).
+> 💡 **Abrilo con `http://localhost:8800`**, con `localhost` y no `127.0.0.1`:
+> la detección de la API en desarrollo se ancla al host de la página,
+> y vía `127.0.0.1` el front buscaría la API mal y daría "sin conexión".
+
 Registrate con **email** o con **celular (+54 9)** y listo: escaneo de
 patentes ✅, búsqueda dual ✅, órdenes de trabajo ✅.
 
@@ -146,8 +154,7 @@ de código abierto de los proyectos [fast-alpr](https://github.com/ankandrew/fas
 y [fast-plate-ocr](https://github.com/ankandrew/fast-plate-ocr)
 (MIT / Apache-2.0).
 
-**Licencia:** MIT — el archivo `LICENSE` formal se incorporará antes del
-primer release público (mantener nota hasta entonces).
+**Licencia:** MIT — mirá el archivo [`LICENSE`](./LICENSE).
 
 ---
 

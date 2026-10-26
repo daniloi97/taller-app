@@ -354,7 +354,7 @@ nunca exponen stack — QA fase1 cubre los flujos token/OTP y algunos 400/401/40
 | Archivo | Tamaño | Responsabilidad |
 |---|---|---|
 | `index.html` | ~750 líneas | Estructura declarativa: 3 vistas raíz + 8 modales + `#toasts`; carga `app.js` al FINAL del body (sin defer/async — el IIFE controla arranque) |
-| `app.js` | ~3.000 líneas | Toda la lógica en UNA IIFE (cero variables globales): API, estado, render, escáner ALPR, auth dual, perfil, restauración de contraseña, tema |
+| `app.js` | ~3.000 líneas | Lógica ES2017+ (async/await) en UNA IIFE (cero variables globales): API, estado, render, escáner ALPR, auth dual, perfil, restauración de contraseña, tema |
 | `styles.css` | ~1.250 líneas | Mobile-first, variables de tema (`--brand`…), vistas raíz (`.vista-raiz`), bottom sheets, ALPR HUD |
 
 ### 5.2 Estado global y persistencia
