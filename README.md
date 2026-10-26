@@ -9,7 +9,7 @@
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-12%2B-4169E1?logo=postgresql&logoColor=white)
 ![ONNX Runtime](https://img.shields.io/badge/ONNX%20Runtime-Web-5C2D91)
 [![Licencia](https://img.shields.io/badge/Licencia-MIT-green)](./LICENSE)
-![Estado](https://img.shields.io/badge/Estado-pre--deploy%20·%20Fase%204b-blue)
+![Estado](https://img.shields.io/badge/Estado-pre--deploy%20·%20Fase%205-blue)
 
 ---
 
@@ -131,7 +131,7 @@ dependencias la primera vez, aplica el esquema y levanta la API —
 con Node portable si no lo tenés instalado.
 
 > 💡 Salud del servidor: abrí **http://localhost:3000/api/v1/health**
-> y deberías ver un `{"ok": true, ...}` con el driver de la base en uso.
+> y deberías ver un `{"ok":true}` mínimo (sin datos de la base; Fase 5 · C3).
 
 ---
 

@@ -1,14 +1,18 @@
 /* ============================================================================
-   routes/clientes.js — /api/v1/clientes
+   routes/clientes.js — /api/v1/clientes (aislamiento multi-tenant, Fase 5)
 
-   GET    /              Lista (o filtro ?dni=)
+   GET    /              Lista (o filtro ?dni=) — SOLO clientes del taller del
+                         usuario del JWT (usuario_id = req.usuario.sub)
    GET    /:id           Ficha: cliente + vehículos activos e históricos
-   POST   /              Alta (DNI único; normaliza dígitos)
+   POST   /              Alta (DNI único POR TALLER; normaliza dígitos)
    PUT    /:id           Contacto: nombre / telefono / email
    DELETE /:id           Baja — los vehículos pasan a cliente_id = NULL
                          (ON DELETE SET NULL del schema.sql) = "Propietario
                          desconocido"; el historial de dueños conserva sus
                          snapshots y pierde sólo la referencia.
+
+   REGLA C4: todo read/write resuelve SIEMPRE dentro del tenant del token.
+   Un recurso ajeno responde 404 (nunca 403): sin oráculos de enumeración.
    ============================================================================ */
 'use strict';
 
@@ -38,16 +42,25 @@ router.get('/', (req, res) => {
   const dni = normDni(req.query.dni);
   let filas;
   if (dni) {
-    filas = db.selectAll('SELECT ' + CAMPOS_CLIENTE + ' FROM clientes WHERE dni = ? ORDER BY nombre', [dni]);
+    filas = db.selectAll(
+      'SELECT ' + CAMPOS_CLIENTE + ' FROM clientes WHERE dni = ? AND usuario_id = ? ORDER BY nombre',
+      [dni, req.usuario.sub]
+    );
   } else {
-    filas = db.selectAll('SELECT ' + CAMPOS_CLIENTE + ' FROM clientes ORDER BY nombre');
+    filas = db.selectAll(
+      'SELECT ' + CAMPOS_CLIENTE + ' FROM clientes WHERE usuario_id = ? ORDER BY nombre',
+      [req.usuario.sub]
+    );
   }
   res.json(camelize(filas));
 });
 
-/* ---------------------------- GET /:id (fiche composite) --------------- */
+/* ---------------------------- GET /:id (ficha compuesta) --------------- */
 router.get('/:id', (req, res) => {
-  const cli = db.getOne('SELECT ' + CAMPOS_CLIENTE + ' FROM clientes WHERE id = ?', [req.params.id]);
+  const cli = db.getOne(
+    'SELECT ' + CAMPOS_CLIENTE + ' FROM clientes WHERE id = ? AND usuario_id = ?',
+    [req.params.id, req.usuario.sub]
+  );
   if (!cli) fail(404, 'Cliente no encontrado');
 
   /* Titulares actuales del cliente (auto en circulación a su nombre) */
@@ -91,16 +104,18 @@ router.post('/', (req, res) => {
   if (!nombre) fail(400, 'El nombre es obligatorio');
   if (!dni) fail(400, 'El DNI es obligatorio (sólo dígitos)');
 
-  /* Valida unicidad ANTES del insert: el índice UNIQUE es el backstop */
-  if (db.getOne('SELECT 1 AS ok FROM clientes WHERE dni = ?', [dni])) {
+  /* Valida unicidad EN EL TALLER antes del insert: el índice UNIQUE compuesto
+     (usuario_id, dni) es el backstop — el mismo DNI puede existir en otro taller
+     sin bloquear este alta. */
+  if (db.getOne('SELECT 1 AS ok FROM clientes WHERE dni = ? AND usuario_id = ?', [dni, req.usuario.sub])) {
     fail(409, 'Ya existe un cliente con el DNI ' + dni);
   }
 
   const id = db.nuevoId();
   db.tx(function () {
     db.run(
-      'INSERT INTO clientes (id, nombre, dni, telefono, email) VALUES (?, ?, ?, ?, ?)',
-      [id, nombre, dni, telefono, email]
+      'INSERT INTO clientes (id, usuario_id, nombre, dni, telefono, email) VALUES (?, ?, ?, ?, ?, ?)',
+      [id, req.usuario.sub, nombre, dni, telefono, email]
     );
   });
 
@@ -111,7 +126,7 @@ router.post('/', (req, res) => {
 /* ------------------------------------------------------------- PUT /:id  */
 /* Actualiza SOLO datos de contacto: el DNI es clave de negocio y no viaja */
 router.put('/:id', (req, res) => {
-  const cli = db.getOne('SELECT id FROM clientes WHERE id = ?', [req.params.id]);
+  const cli = db.getOne('SELECT id FROM clientes WHERE id = ? AND usuario_id = ?', [req.params.id, req.usuario.sub]);
   if (!cli) fail(404, 'Cliente no encontrado');
 
   const body = req.body || {};
@@ -132,7 +147,7 @@ router.put('/:id', (req, res) => {
 
 /* ---------------------------------------------------- DELETE /:id ------ */
 router.delete('/:id', (req, res) => {
-  const cli = db.getOne('SELECT id FROM clientes WHERE id = ?', [req.params.id]);
+  const cli = db.getOne('SELECT id FROM clientes WHERE id = ? AND usuario_id = ?', [req.params.id, req.usuario.sub]);
   if (!cli) fail(404, 'Cliente no encontrado');
 
   const conexos = db.getOne('SELECT COUNT(*) AS n FROM vehiculos WHERE cliente_id = ?', [cli.id]).n;

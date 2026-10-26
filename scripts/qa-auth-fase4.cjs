@@ -130,8 +130,18 @@ async function main() {
     r.j && r.j.usuario && r.j.usuario.nombre === 'María Elena' && r.j.usuario.apellido === 'González', r.j);
 
   r = await req('PUT', '/auth/profile',
-    { nombre: 'Juan Carlos', apellido: 'Pérez Rossi', email: 'qa.f4.juan@taller.com' }, tokenJuan);
-  chequear('PUT /profile nombre+apellido+email → 200', r.status === 200, r.j);
+    { nombre: 'Juan Carlos', apellido: 'Pérez Rossi' }, tokenJuan);
+  chequear('PUT /profile nombre+apellido sin identidad (no pide reauth) → 200', r.status === 200, r.j);
+
+  /* C5: cambiar email exige passwordActual (403 sin ella / con má) */
+  r = await req('PUT', '/auth/profile', { email: 'qa.f4.juan@taller.com' }, tokenJuan);
+  chequear('PUT /profile email SIN passwordActual → 403 reauth', r.status === 403, r.j);
+  r = await req('PUT', '/auth/profile',
+    { nombre: 'Juan Carlos', apellido: 'Pérez Rossi', email: 'qa.f4.juan@taller.com', passwordActual: 'clave-mala-00' }, tokenJuan); //gitleaks:allow
+  chequear('PUT /profile email con passwordActual incorrecta → 403', r.status === 403, r.j);
+  r = await req('PUT', '/auth/profile',
+    { nombre: 'Juan Carlos', apellido: 'Pérez Rossi', email: 'qa.f4.juan@taller.com', passwordActual: 'clave-f4-tel' }, tokenJuan); //gitleaks:allow
+  chequear('PUT /profile nombre+apellido+email (reauth OK) → 200', r.status === 200, r.j);
   r = await req('GET', '/auth/profile', undefined, tokenJuan);
   chequear('GET /profile refleja identidad personal editada',
     r.status === 200 && r.j && r.j.usuario && r.j.usuario.nombre === 'Juan Carlos'
@@ -148,13 +158,15 @@ async function main() {
 
   /* ---------------------- 6) PUT /profile teléfono argentino --------------- */
   r = await req('PUT', '/auth/profile', { telefono: '5491133224466' }, tokenMaria);
-  chequear('PUT /profile teléfono 549… → 200', r.status === 200, r.j);
+  chequear('PUT /profile teléfono SIN passwordActual → 403 reauth', r.status === 403, r.j);
+  r = await req('PUT', '/auth/profile', { telefono: '5491133224466', passwordActual: 'clave-f4-1234' }, tokenMaria); //gitleaks:allow
+  chequear('PUT /profile teléfono 549… (reauth OK) → 200', r.status === 200, r.j);
   r = await req('GET', '/auth/profile', undefined, tokenMaria);
   chequear('GET /profile devuelve el teléfono actualizado',
     r.j && r.j.usuario && r.j.usuario.telefono === '5491133224466', r.j);
 
-  r = await req('PUT', '/auth/profile', { telefono: '54911' }, tokenMaria);
-  chequear('PUT /profile teléfono de 5 dígitos → 400', r.status === 400, r.j);
+  r = await req('PUT', '/auth/profile', { telefono: '54911', passwordActual: 'clave-f4-1234' }, tokenMaria); //gitleaks:allow
+  chequear('PUT /profile teléfono de 5 dígitos (reauth OK) → 400', r.status === 400, r.j);
 
   /* ---------------------- 7) regresión: flujo legado sigue completo -------- */
   await espera(450);

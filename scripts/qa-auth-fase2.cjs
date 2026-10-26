@@ -150,11 +150,11 @@ async function main() {
     r.status === 200 && !r.j.dev, r.j);
 
   /* ------------------------------- 6) registro por teléfono + OTP (dual) */
-  r = await req('POST', '/auth/register', { metodo: 'telefono', telefono: '5497000000001', password: 'clave-otp-1234', nombre: 'QA', apellido: 'Otp Uno', nombreTaller: 'QA OTP Taller' });
+  r = await req('POST', '/auth/register', { metodo: 'telefono', telefono: '5497000000001', password: 'clave-otp-1234', nombre: 'QA', apellido: 'Otp Uno', nombreTaller: 'QA OTP Taller' }); //gitleaks:allow
   chequear('register teléfono → necesitaVerificacion', r.status === 200 && r.j.necesitaVerificacion === true, r.j);
   const otpReg = r.j.dev && r.j.dev.otp;
 
-  r = await req('POST', '/auth/verify-otp', { telefono: '5497000000001', otp: otpReg, password: 'clave-otp-1234', nombreTaller: 'QA OTP Taller' });
+  r = await req('POST', '/auth/verify-otp', { telefono: '5497000000001', otp: otpReg, password: 'clave-otp-1234', nombreTaller: 'QA OTP Taller' }); //gitleaks:allow
   chequear('verify-otp con password → 200 + token', r.status === 200 && Boolean(r.j.token) && r.j.usuario.nombreTaller === 'QA OTP Taller', r.j);
   chequear('verify crea la cuota en 1/2 (contó el envío del registro)', r.j.usuario.cuotaOtp.usados === 1, r.j.usuario);
   const tokenUser2 = r.j.token;
@@ -169,9 +169,10 @@ async function main() {
   chequear('cuota agotada sin email → 429 soporte@taller.com', r.status === 429 &&
     r.j.error.mensaje === 'Límite de solicitudes alcanzado. Contacta a soporte: soporte@taller.com', r.j.error);
 
-  /* Vincular email vía perfil (usuario 2 tiene token del verify) */
-  r = await req('PUT', '/auth/profile', { email: 'qa.otp2@taller.com' }, tokenUser2);
-  chequear('PUT profile → email vinculado', r.status === 200 && r.j.usuario.email === 'qa.otp2@taller.com', r.j);
+  /* Vincular email vía perfil (usuario 2 tiene token del verify).
+     C5: cambiar identidad exige la contraseña actual (de verify-otp). */
+  r = await req('PUT', '/auth/profile', { email: 'qa.otp2@taller.com', passwordActual: 'clave-otp-1234' }, tokenUser2); //gitleaks:allow
+  chequear('PUT profile → email vinculado (C5: passwordActual OK)', r.status === 200 && r.j.usuario.email === 'qa.otp2@taller.com', r.j);
 
   /* nueva sesión con la versión actualizada (el email cambió, el token existe) */
   const p1 = await req('GET', '/auth/profile', undefined, tokenUser2);
@@ -189,8 +190,15 @@ async function main() {
   r = await req('GET', '/auth/profile', undefined, tokenUser1);
   chequear('GET profile → usuario + cuota', r.status === 200 && r.j.usuario && r.j.usuario.cuotaOtp.limite === 2, r.j);
 
+  /* C5: sin passwordActual NO se llega ni a la unicidad → 403 */
   r = await req('PUT', '/auth/profile', { email: 'qa.fase2@taller.com' }, tokenUser2);
-  chequear('PUT profile con email ajeno → 409', r.status === 409, r.j);
+  chequear('PUT profile con email ajeno SIN passwordActual → 403 reauth', r.status === 403, r.j);
+
+  r = await req('PUT', '/auth/profile', { email: 'qa.fase2@taller.com', passwordActual: 'clave-bad-999' }, tokenUser2); //gitleaks:allow
+  chequear('PUT profile con passwordActual incorrecta → 403', r.status === 403, r.j);
+
+  r = await req('PUT', '/auth/profile', { email: 'qa.fase2@taller.com', passwordActual: 'clave-otp-1234' }, tokenUser2); //gitleaks:allow
+  chequear('PUT profile con email ajeno + passwordActual OK → 409', r.status === 409, r.j);
 
   r = await req('PUT', '/auth/profile', { nombreTaller: 'QA Fase2 Taller Editado' }, tokenUser1);
   chequear('PUT profile nombre del taller → cambia y vuelve', r.status === 200 &&
@@ -204,8 +212,8 @@ async function main() {
   chequear('register teléfono 2 verificado', r.status === 200 && Boolean(r.j.token), r.j);
   const tokenUser3 = r.j.token;
 
-  r = await req('PUT', '/auth/profile', { email: 'qa.otp3@taller.com' }, tokenUser3);
-  chequear('usuario 3 con email vinculado', r.status === 200 && r.j.usuario.email === 'qa.otp3@taller.com', r.j);
+  r = await req('PUT', '/auth/profile', { email: 'qa.otp3@taller.com', passwordActual: 'clave-otp-02aa' }, tokenUser3); //gitleaks:allow
+  chequear('usuario 3 con email vinculado (C5 OK)', r.status === 200 && r.j.usuario.email === 'qa.otp3@taller.com', r.j);
 
   await espera(450);   /* este usuario comió 1 envío por el registro */
   r = await req('POST', '/auth/request-otp', { telefono: '5497000000002' });

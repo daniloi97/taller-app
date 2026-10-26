@@ -80,6 +80,7 @@ function ejecutarSchema() {
    el schema crea todo). El schema se aplica SIEMPRE: en base vacía crea
    TODO y sobre una base previa re-ejecuta el DDL idempotente. */
 migrarUsuariosFase2();
+migrarMultiTenant();
 ejecutarSchema();
 
 /* ---------------------------------------------------------------- migración */
@@ -126,6 +127,78 @@ function migrarUsuariosFase2() {
         + col + ' duplicados — deduplicar y reintentar (' + e.message + ')');
     }
   });
+
+  /* W4 (Fase 5): los teléfonos legados pueden llevar el '+' de prefijo. La
+     regla nueva de normalizar.js guarda SÓLO dígitos ('+54911…' ≡ '54911…'):
+     se limpia el '+' en disco una sola vez (idempotente) y se avisa si esa
+     limpieza descubrió duplicados (mismo número con y sin '+'). */
+  const limpio = run("UPDATE usuarios SET telefono = REPLACE(telefono, '+', '') WHERE telefono LIKE '+%'");
+  if (limpio.changes) {
+    console.log("[db][migracion][W4] telefono: " + limpio.changes + " número(s) re-normalizados sin '+'");
+  }
+  if (getOne('SELECT COUNT(*) AS n FROM usuarios WHERE telefono IS NOT NULL GROUP BY telefono HAVING COUNT(*) > 1')) {
+    console.log("[db][migracion][W4] telefono: quedaron duplicados al quitar el '+' — deduplicar usuarios");
+  }
+}
+
+/* Migración de aislamiento multi-tenant (Fase 5 · C4), idempotente como
+   migrarUsuariosFase2: ALTER TABLE si falta la columna (inspección previa
+   con PRAGMA table_info), backfill de filas legadas y RE-CREACIÓN de los
+   índices UNIQUE con nombres compuestos (se dropean los globales
+   idx_clientes_dni / idx_vehiculos_patente y se crean por taller). */
+function migrarMultiTenant() {
+  ['clientes', 'vehiculos'].forEach(function (tabla) {
+    const cols = selectAll('PRAGMA table_info(' + tabla + ')');
+    if (!cols.length) return;          /* base nueva: schema.sql crea todo */
+    const presentes = {};
+    cols.forEach(function (c) { presentes[c.name] = true; });
+
+    if (!presentes.usuario_id) {
+      exec('ALTER TABLE ' + tabla + ' ADD COLUMN usuario_id VARCHAR(36)');
+      console.log('[db][migracion] ' + tabla + '.usuario_id agregada (aislamiento por taller)');
+    }
+
+    /* Datos legados sin taller: se asignan al PRIMER usuario registrado
+       (las instalaciones previas eran de un solo taller). Si todavía no
+       hay usuarios quedan NULL — SQLite admite varios NULL en el índice
+       UNIQUE compuesto — hasta que exista a quien transferirlos. */
+    const huerfanos = getOne('SELECT COUNT(*) AS n FROM ' + tabla + ' WHERE usuario_id IS NULL').n;
+    if (huerfanos) {
+      const titular = getOne('SELECT id FROM usuarios LIMIT 1');
+      if (titular) {
+        const filas = run('UPDATE ' + tabla + ' SET usuario_id = ? WHERE usuario_id IS NULL', [titular.id]).changes;
+        console.log('[db][migracion][C4] ' + tabla + ': ' + filas + ' fila(s) legadas asignadas al taller del usuario ' + titular.id);
+      } else {
+        console.log('[db][migracion][C4] ' + tabla + ': ' + huerfanos + ' fila(s) sin taller asignado (aún no se registró ningún usuario)');
+      }
+    }
+  });
+
+  /* Los UNIQUE globales de DNI/patente dejan de regir: se dropean los
+     globales y se crean los compuestos por taller con nombres nuevos.
+     Sólo si las tablas EXISTEN (en una base fresca el schema.sql las crea
+     con los índices correctos y acá no hay nada que migrar). Si una base
+     legada trae DNI/chapa repetidos DENTRO del mismo taller, el CREATE
+     UNIQUE falla: se registra el aviso y la app arranca igual (los
+     check-then-insert de negocio siguen protegiendo por usuario). */
+  const hayClientes = selectAll('PRAGMA table_info(clientes)').length > 0;
+  const hayVehiculos = selectAll('PRAGMA table_info(vehiculos)').length > 0;
+  if (hayClientes && hayVehiculos) {
+    exec('DROP INDEX IF EXISTS idx_clientes_dni');
+    exec('DROP INDEX IF EXISTS idx_vehiculos_patente');
+    [
+      'CREATE UNIQUE INDEX IF NOT EXISTS idx_clientes_usuario_dni ON clientes (usuario_id, dni)',
+      'CREATE UNIQUE INDEX IF NOT EXISTS idx_vehiculos_usuario_patente ON vehiculos (usuario_id, patente)'
+    ].forEach(function (ddl) {
+      try {
+        exec(ddl);
+      } catch (e) {
+        console.log('[db][migracion][C4] índice NO creado por duplicados dentro del mismo taller: ' + e.message);
+      }
+    });
+    exec('CREATE INDEX IF NOT EXISTS idx_clientes_usuario ON clientes (usuario_id)');
+    exec('CREATE INDEX IF NOT EXISTS idx_vehiculos_usuario ON vehiculos (usuario_id)');
+  }
 }
 
 function nuevoId() {

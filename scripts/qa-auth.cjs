@@ -50,7 +50,7 @@ function separar(token) {
   /* ---- 1) públicos ---- */
   let r = await req('GET', '/health');
   chequear('health público → 200 sin token', r.status === 200 && r.json && r.json.ok === true, r);
-  chequear('health oculta nada sensible en dev', r.json && r.json.db, r.json);
+  chequear('health → sólo {ok} (sin driver ni ruta de BD, C3/W7)', r.json && r.json.ok === true && !('db' in r.json) && !('driver' in r.json), r.json);
 
   /* ---- 2) rutas protegidas sin token ---- */
   r = await req('GET', '/clientes');
@@ -146,7 +146,7 @@ function separar(token) {
 
   /* ---- 13) ruta inexistente sigue 404 (e igualmente trazada) ---- */
   r = await req('GET', '/auth/inventado');
-  chequear('GET /auth/inventado → 404 RUTA_NO_ENCONTRADA', r.status === 404 && r.json.error.codigo === 'RUTA_NO_ENCONTRADA', r);
+  chequear('GET /auth/inventado → 401 (deny-by-default C3: bajo la frontera JWT)', r.status === 401 && r.json.error.codigo === 'NO_AUTORIZADO', r);
 
   console.log('\nRESULTADO: ' + (mal ? 'ROJO (' + mal + ' fallos)' : 'GREEN') + ' — ' + ok + ' checks OK');
   process.exit(mal ? 1 : 0);

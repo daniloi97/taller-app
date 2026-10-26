@@ -1,23 +1,52 @@
 # Dependencias
 node_modules/
 
-# Base de datos local (SQLite y sidecars WAL/SHM; *.db por si cambia DB_PATH)
+# Base de datos local (SQLite y journals/sidecars; *.db por si cambia DB_PATH)
 data/
 *.sqlite
 *.sqlite3
+*.sqlite-journal
 *.sqlite-shm
 *.sqlite-wal
 *.db
+*.db-journal
+*.db-shm
+*.db-wal
+
+# Volcados y backups de datos (pueden contener PII de clientes: nunca fuera)
+*.dump
+*.sql.gz
+backup-*
 
 # Variables de entorno y secretos (nunca commitear el .env real)
 .env
 .env.*
 *.env
+!.env.example
+
+# Claves, certificados y credenciales de tooling (fail-safe si algo cae acá)
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+.npmrc
 
 # Logs
 logs/
 *.log
 npm-debug.log*
+
+# Binarios y artefactos locales
+tools/
+coverage/
+*.tgz
+
+# IDE
+.idea/
+.vscode/
 
 # Sistema operativo
 Thumbs.db

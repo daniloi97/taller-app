@@ -39,19 +39,37 @@ const crypto = require('crypto');
 const db = require('../db');
 const { camelize } = require('../utils/camel');
 const { fail } = require('../utils/errors');
+const { normTelefono } = require('../utils/normalizar');
 
 const router = express.Router();
 
 /* ------------------------------------------------------------------ secret */
-const SECRETO_DEV = 'secreto-de-desarrollo-cambiar';
-const SECRETO = process.env.JWT_SECRET ||
-  (process.env.NODE_ENV === 'production' ? null : SECRETO_DEV);
+/* Fail-closed (Fase 5 · C1): sólo el valor EXACTO 'development' habilita el
+   modo laxo — vacío, 'production', 'staging', 'test'… todo lo demás es estricto.
+   Sin JWT_SECRET en desarrollo se genera una clave EFÍMERA (crypto.randomBytes):
+   las sesiones vencen al reiniciar y no existe ningún secreto conocido en el
+   repo. Con JWT_SECRET definida se exige fuerza mínima (≥ 32 caracteres y sin
+   palabras tipo "cambiar/changeme"). */
+const ES_DEV = process.env.NODE_ENV === 'development';
+const EXPONER_CODIGOS = ES_DEV && process.env.DEV_EXPOSE_CODES === 'true';
+
+let SECRETO = process.env.JWT_SECRET;
 if (!SECRETO) {
-  console.error('[auth] FATAL: con NODE_ENV=production es obligatorio definir JWT_SECRET en el entorno.');
+  if (!ES_DEV) {
+    console.error('[auth] FATAL: JWT_SECRET es obligatorio salvo con NODE_ENV=development.');
+    process.exit(1);
+  }
+  SECRETO = crypto.randomBytes(48).toString('base64');
+  console.warn('[auth] AVISO: JWT_SECRET ausente; se usa una clave aleatoria EFÍMERA (las sesiones vencen al reiniciar el server).');
+} else if (SECRETO.length < 32 || /cambiar|secreto|changeme/i.test(SECRETO)) {
+  console.error('[auth] FATAL: JWT_SECRET débil (mínimo 32 caracteres aleatorios, sin "cambiar"/"changeme").');
   process.exit(1);
 }
-if (!process.env.JWT_SECRET) {
-  console.warn('[auth] AVISO: JWT_SECRET no está en .env — estoy usando una clave de desarrollo porque no es producción.');
+
+/* Log de los mocks de canal (OTP/links de reset): SÓLO con la doble llave
+   (development + DEV_EXPOSE_CODES=true). En producción queda mudo. */
+function mock(mensaje) {
+  if (EXPONER_CODIGOS) console.log(mensaje);
 }
 
 /* ------------------------------------------------------------- constantes */
@@ -80,12 +98,11 @@ const otps = new Map();
 const resetsEmail = new Map();
 
 /* ------------------------------------------------------------ validadores */
-function normalizarTelefono(valor) {
-  return String(valor == null ? '' : valor).replace(/[^\d+]/g, '');
-}
+/* W4: delega en utils/normalizar.js — SÓLO dígitos (el '+' también se
+   elimina), así '+54911…' y '54911…' caen en la misma clave de cuenta. */
 
-/* Formato: 8..15 dígitos (acepta el '+' de prefijo internacional; el resto
-   se normalizó fuera: sin espacios/guiones). Guarda en la BD tal cual. */
+/* Formato: 8..15 dígitos (sin el '+' del prefijo internacional; la
+   normalización sacó todo lo que no era número). Guarda en la BD tal cual. */
 function telefonoValido(tel) {
   const solo = tel.replace(/\D/g, '');
   return solo.length >= 8 && solo.length <= 15;
@@ -227,7 +244,7 @@ function usuarioPorId(id) {
 /* Envía el OTP por el canal teléfono. Aplica (en orden): formato → reset
    mensual → cuota (429 con mensaje según el email) → anti-spam 30 s. */
 router.post('/request-otp', function (req, res) {
-  const tel = normalizarTelefono((req.body || {}).telefono);
+  const tel = normTelefono((req.body || {}).telefono);
   if (!telefonoValido(tel)) {
     fail(400, 'Número inválido: enviá el WhatsApp en formato internacional sin espacios, p.ej. 5491112345678');
   }
@@ -269,9 +286,9 @@ router.post('/request-otp', function (req, res) {
     );
   }
 
-  /* Mock del canal: Fase 2 imprime; Fase 3 llama a la Cloud API de WhatsApp
-     (plantilla de OTP) con el mismo código generado acá. */
-  console.log('[auth][WHATSAPP-MOCK] → ' + tel + ' · OTP: ' + codigo + ' · vence en 5 minutos');
+  /* Mock del canal: imprime que se "envió" (Fase 3: WhatsApp Cloud API con
+     plantilla de OTP). SÓLO con DEV_EXPOSE_CODES=true (Fase 5 · C2). */
+  mock('[auth][WHATSAPP-MOCK] → ' + tel + ' · OTP: ' + codigo + ' · vence en 5 minutos');
 
   const respuesta = {
     enviado: true,
@@ -279,8 +296,8 @@ router.post('/request-otp', function (req, res) {
     expiraEn: Math.round(OTP_VIDA_MS / 1000),
     cuotaOtp: { usados: usosMes, limite: OTP_CUOTA_MENSUAL }
   };
-  /* Dato de prueba alineado al spec: únicamente en desarrollo */
-  if (process.env.NODE_ENV === 'development') respuesta.dev = { otp: codigo };
+  /* Dato de prueba: doble llave (development + opt-in explícito de QA) */
+  if (EXPONER_CODIGOS) respuesta.dev = { otp: codigo };
   res.status(200).json(respuesta);
 });
 
@@ -290,7 +307,7 @@ router.post('/request-otp', function (req, res) {
    que se le agrega contraseña) y firma un JWT de 30 días → { token, usuario }. */
 router.post('/verify-otp', function (req, res) {
   const body = req.body || {};
-  const tel = normalizarTelefono(body.telefono);
+  const tel = normTelefono(body.telefono);
   if (!telefonoValido(tel)) fail(400, 'Número inválido: volvé al paso 1 y ingresá tu WhatsApp');
 
   const otp = String(body.otp == null ? '' : body.otp).replace(/\D/g, '');
@@ -403,7 +420,7 @@ router.post('/register', function (req, res) {
   }
 
   if (metodo === 'telefono' || metodo === 'teléfono') {
-    const tel = normalizarTelefono(body.telefono);
+    const tel = normTelefono(body.telefono);
     if (!telefonoValido(tel)) {
       fail(400, 'Número inválido: enviá el WhatsApp en formato internacional sin espacios, p.ej. 5491112345678');
     }
@@ -423,7 +440,7 @@ router.post('/register', function (req, res) {
       codigo: codigo, creado: Date.now(), expira: Date.now() + OTP_VIDA_MS,
       intentos: 0, usosMes: 1
     });
-    console.log('[auth][WHATSAPP-MOCK] → ' + tel + ' · OTP: ' + codigo + ' · vence en 5 minutos');
+    mock('[auth][WHATSAPP-MOCK] → ' + tel + ' · OTP: ' + codigo + ' · vence en 5 minutos');
 
     const respuesta = {
       necesitaVerificacion: true,
@@ -432,7 +449,7 @@ router.post('/register', function (req, res) {
       expiraEn: Math.round(OTP_VIDA_MS / 1000),
       cuotaOtp: { usados: 1, limite: OTP_CUOTA_MENSUAL }
     };
-    if (process.env.NODE_ENV === 'development') respuesta.dev = { otp: codigo };
+    if (EXPONER_CODIGOS) respuesta.dev = { otp: codigo };
     return res.status(200).json(respuesta);
   }
 
@@ -514,8 +531,8 @@ router.post('/olvide-password', function (req, res) {
   if (usuario) {
     const token = crypto.randomBytes(24).toString('hex');
     resetsEmail.set(token, { email: email, expira: Date.now() + TOKEN_RESET_VIDA_MS });
-    console.log('[auth][EMAIL-MOCK] → ' + email + ' · token de restablecimiento: ' + token + ' · vence en 15 minutos');
-    if (process.env.NODE_ENV === 'development') respuesta.dev = { token: token };
+    mock('[auth][EMAIL-MOCK] → ' + email + ' · token de restablecimiento: ' + token + ' · vence en 15 minutos');
+    if (EXPONER_CODIGOS) respuesta.dev = { token: token };
   }
   res.status(200).json(respuesta);
 });
@@ -533,7 +550,7 @@ router.post('/reset-password', function (req, res) {
   }
 
   if (body.via === 'otp') {
-    const tel = normalizarTelefono(body.telefono);
+    const tel = normTelefono(body.telefono);
     if (!telefonoValido(tel)) fail(400, 'Número inválido: usá el formato internacional (549…)');
     const otp = String(body.otp == null ? '' : body.otp).replace(/\D/g, '');
     if (otp.length !== 6) fail(400, 'El código tiene 6 dígitos');
@@ -608,12 +625,32 @@ router.get('/profile', proteger, function (req, res) {
      vacío no limpia por accidente el dato de recuperación).
    · email se guarda en minúsculas (unicidad case-insensitive).
    · si cambia el teléfono se re-firma el token (el JWT lo lleva en payload).
-   · Cuotas e intentos NO se tocan por acá (son de seguridad, no de perfil). */
+   · Cuotas e intentos NO se tocan por acá (son de seguridad, no de perfil).
+   · REAUTENTICACIÓN (Fase 5 · C5): cambiar email o teléfono altera los
+     identificadores de acceso/recuperación de la cuenta ⇒ se exige la
+     contraseña actual (verificada contra password_hash con scrypt). Cuentas
+     OTP-only (sin hash) verifican identidad con un OTP de su propio teléfono
+     (pedirlo antes vía POST /auth/request-otp y pasarlo como otpActual). */
 router.put('/profile', proteger, function (req, res) {
   const fila = usuarioPorId(req.usuario.sub);
   if (!fila) fail(401, 'La cuenta del token ya no existe: iniciá sesión de nuevo');
 
   const body = req.body || {};
+
+  /* Cambios de identidad ANTES de validar nada más: sin confirmación se
+     corta acá (403) y ni se consulta la unicidad del dato nuevo. */
+  if (body.email !== undefined || body.telefono !== undefined) {
+    if (fila.password_hash) {
+      if (!verificarPassword(String(body.passwordActual == null ? '' : body.passwordActual), fila.password_hash)) {
+        fail(403, 'Confirmá tu contraseña actual para cambiar email o teléfono');
+      }
+    } else if (fila.telefono) {
+      consumirOtp(fila.telefono, String(body.otpActual == null ? '' : body.otpActual).replace(/\D/g, ''));
+    } else {
+      fail(403, 'No se puede verificar tu identidad para este cambio');
+    }
+  }
+
   const sets = [];
   const params = [];
 
@@ -628,7 +665,7 @@ router.put('/profile', proteger, function (req, res) {
   }
 
   if (body.telefono !== undefined) {
-    const tel = normalizarTelefono(body.telefono);
+    const tel = normTelefono(body.telefono);
     if (tel && !telefonoValido(tel)) {
       fail(400, 'Número inválido: usá el formato internacional sin espacios, p.ej. 5491112345678');
     }
@@ -692,15 +729,16 @@ router.post('/request-password-reset-email', proteger, function (req, res) {
 
   const front = (process.env.FRONT_URL || 'http://localhost:5500/').replace(/\/+$/, '');
   const enlace = front + '/#reset-password?token=' + token;
-  console.log('[auth][EMAIL-MOCK] → ' + fila.email + ' · enlace de cambio de contraseña (15 min): ' + enlace);
+  mock('[auth][EMAIL-MOCK] → usuario ' + fila.id + ' · enlace de cambio de contraseña (15 min) [sin email en el log: PII]');
 
   const respuesta = {
     ok: true,
     mensaje: 'Si el email está vinculado, te enviamos el enlace (válido 15 minutos): ' + fila.email,
     expiraEn: Math.round(TOKEN_RESET_VIDA_MS / 1000)
   };
-  /* En desarrollo el enlace vuelve en la respuesta para probarlo sin correo */
-  if (process.env.NODE_ENV === 'development') respuesta.dev = { token: token, enlace: enlace };
+  /* En desarrollo con opt-in, el enlace vuelve en la respuesta para probarlo
+     sin correo (la consola ya no registra el email: Fase 5 · C2). */
+  if (EXPONER_CODIGOS) respuesta.dev = { token: token, enlace: enlace };
   res.status(200).json(respuesta);
 });
 
@@ -737,7 +775,8 @@ router.post('/confirm-password-reset', function (req, res) {
     [hashPassword(newPassword), usuario.id]
   );
   resetsEmail.delete(token);     /* one-shot: el enlace vale un solo uso */
-  console.log('[auth] Contraseña actualizada vía enlace para ' + guarda.email);
+  /* C2: el log de evento registra el ID del usuario, jamás su email (PII). */
+  console.log('[auth] Contraseña actualizada vía enlace para usuario ' + usuario.id);
   res.status(200).json({ ok: true, mensaje: 'Contraseña actualizada: ingresá con tu nueva contraseña.' });
 });
 

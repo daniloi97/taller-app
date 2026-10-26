@@ -2,8 +2,9 @@
    server.js — punto de entrada de la API (Express)
 
    · Middlewares de base: cors + express.json + log de línea.
-   · Rutas móntadas bajo /api/v1 en módulos routes/ (clientes, vehiculos,
-     ordenes).
+   · Rutas móntadas bajo /api/v1. DENY-BY-DEFAULT (Fase 5 · C3): health y /auth
+     quedan arriba del `proteger` global — TODO lo montado debajo exige JWT
+     válido (sin listas de bloqueo por indexOf ni distinción de mayúsculas).
    · Manejo centralizado de errores: cualquier throw/fail() cae al final y
      responde JSON homogéneo { error: { codigo, mensaje, detalles } }.
    ============================================================================ */
@@ -21,7 +22,10 @@ const app = express();
 app.disable('x-powered-by');
 
 /* ------------------------------------------------------------- básicos */
-const ES_PRODUCCION = process.env.NODE_ENV === 'production';
+/* Fail-closed (Fase 5 · C1): sólo el valor EXACTO 'development' es laxo.
+   NODE_ENV ausente, 'prod', 'staging', 'test'… ⇒ modo estricto. */
+const ES_DEV = process.env.NODE_ENV === 'development';
+const ES_PRODUCCION = !ES_DEV;
 
 /* Cabeceras de seguridad HTTP (CSP, nosniff, X-Frame-Options, HSTS…).
    Sobre APIs que sólo responden JSON son inofensivas y protegen si algún
@@ -38,8 +42,8 @@ if (ES_PRODUCCION && (!process.env.CORS_ORIGIN || ORIGEN === '*')) {
 app.use(cors({ origin: ORIGEN === '*' ? true : ORIGEN.split(',').map(function (o) { return o.trim(); }) }));
 app.use(express.json({ limit: '200kb' }));
 
-/* Log mínimo de acceso (una línea por request, sólo en desarrollo) */
-if (process.env.NODE_ENV !== 'production') {
+/* Log mínimo de acceso (una línea por request, sólo fuera de producción) */
+if (!ES_PRODUCCION) {
   app.use(function (req, res, next) {
     const t0 = Date.now();
     res.on('finish', function () {
@@ -50,37 +54,32 @@ if (process.env.NODE_ENV !== 'production') {
 }
 
 /* ---------------------------------------------------------------- rutas */
+/* DENY-BY-DEFAULT (Fase 5 · C3): 1) health público · 2) /auth público
+   (sus rutas privadas ya llevan proteger) · 3) proteger GLOBAL — todo lo
+   montado debajo exige JWT sin importar mayúsculas ni rutas nuevas;
+   4-6) los routers de negocio, sin proteger duplicado en cada uno. */
 const api = express.Router();
 
+/* Health mínimo ({ok}): sin driver ni ruta de la BD (C3/W7) — 503 si la
+   base no responde. */
 api.get('/health', function (req, res) {
-  res.json({
-    ok: true,
-    driver: db.driver,
-    /* En producción no se filtra la ruta de la BD del servidor */
-    db: ES_PRODUCCION ? undefined : db.DB_PATH,
-    consultable: db.chequearConexion()
-  });
+  const ok = !!db.chequearConexion();
+  res.status(ok ? 200 : 503).json({ ok: ok });
 });
 
-/* ---- AUTENTICACIÓN (público): pedir y verificar el OTP por teléfono ---- */
 api.use('/auth', auth.router);
 
-/* ---- RUTAS DEL NEGOCIO: exigir Authorization: Bearer <token> (JWT) ------ */
-api.use('/clientes', auth.proteger, require('./routes/clientes'));
-api.use('/vehiculos', auth.proteger, require('./routes/vehiculos'));
-/* ordenes monta en la raíz porque responde a /ordenes/* y a
-   /vehiculos/:vehiculoId/ordenes (paths absolutos). Al montarlo con un
-   prefijo sus rutas quedarían relativas y no matchearían (verificado en
-   pruebas). El proteger comodín evalúa el path: sólo las 2 familias del
-   negocio exigen token — cualquier ruta inexistente que llegue acá
-   (p.ej. /auth/inventado) sigue respondiendo 404 pública. */
-function protegerNegocio(req, res, next) {
-  if (req.path.indexOf('/ordenes') === 0 || req.path.indexOf('/vehiculos') === 0) {
-    return auth.proteger(req, res, next);
-  }
-  next();
-}
-api.use('/', protegerNegocio, require('./routes/ordenes'));
+api.use(auth.proteger);   /* ← frontera: abajo reina el JWT */
+
+const clientes = require('./routes/clientes');
+api.use('/clientes', clientes);
+
+const vehiculos = require('./routes/vehiculos');
+api.use('/vehiculos', vehiculos);
+
+const ordenes = require('./routes/ordenes');
+api.use('/vehiculos', ordenes.routerVehiculos);   /* GET /vehiculos/:vid/ordenes */
+api.use('/ordenes', ordenes.router);              /* POST / · GET/PUT/DELETE /:id */
 
 app.use('/api/v1', api);
 

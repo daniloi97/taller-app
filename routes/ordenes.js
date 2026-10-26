@@ -1,5 +1,8 @@
 /* ============================================================================
    routes/ordenes.js — /api/v1/ordenes (+ listado por vehículo)
+   Aislamiento multi-tenant (Fase 5 · C4): toda orden se resuelve vía JOIN con
+   vehiculos (v.usuario_id = req.usuario.sub) — recurso ajeno ⇒ 404, sin
+   oráculos de enumeración.
 
    GET    /vehiculos/:vehiculoId/ordenes  Órdenes del vehículo con sus tareas
                                           (tareas_orden) y repuestos
@@ -21,7 +24,8 @@ const { camelize } = require('../utils/camel');
 const { fail } = require('../utils/errors');
 const { hoyISO, fechaISOoNada, enteroOoNada, monto0 } = require('../utils/normalizar');
 
-const router = express.Router();
+const router = express.Router();            /* se monta bajo '/ordenes' */
+const routerVehiculos = express.Router();   /* se monta bajo '/vehiculos' */
 
 /* ---------- composición de una orden (POST/PUT devuelven lo creado) ----- */
 function ordenCompleta(id) {
@@ -71,10 +75,13 @@ function subirOdometro(vehiculoId, km) {
 }
 
 /* =================== GET /vehiculos/:vehiculoId/ordenes ================= */
-/* 3 consultas planas (sin N+1): cabeceras + todos los detalles, agrupados. */
-router.get('/vehiculos/:vehiculoId/ordenes', (req, res) => {
+/* Montado en /vehiculos por server.js → responde /vehiculos/:vid/ordenes.
+   3 consultas planas (sin N+1): cabeceras + todos los detalles, agrupados.
+   C4: el vehículo debe existir Y ser del taller del token (ajeno ⇒ 404);
+   las órdenes y detalles quedan acotados por vehiculo_id. */
+routerVehiculos.get('/:vehiculoId/ordenes', (req, res) => {
   const vid = String(req.params.vehiculoId);
-  if (!db.getOne('SELECT 1 AS ok FROM vehiculos WHERE id = ?', [vid])) {
+  if (!db.getOne('SELECT 1 AS ok FROM vehiculos WHERE id = ? AND usuario_id = ?', [vid, req.usuario.sub])) {
     fail(404, 'Vehículo no encontrado');
   }
   const ordenes = db.selectAll(
@@ -112,7 +119,7 @@ router.get('/vehiculos/:vehiculoId/ordenes', (req, res) => {
 });
 
 /* ============================ POST /ordenes ============================= */
-router.post('/ordenes', (req, res) => {
+router.post('/', (req, res) => {
   const body = req.body || {};
   if (!body.vehiculoId) fail(400, 'Falta vehiculoId');
 
@@ -128,7 +135,10 @@ router.post('/ordenes', (req, res) => {
   const ordenId = db.nuevoId();
 
   db.tx(function () {
-    const v = db.getOne('SELECT id FROM vehiculos WHERE id = ?', [String(body.vehiculoId)]);
+    const v = db.getOne(
+      'SELECT id FROM vehiculos WHERE id = ? AND usuario_id = ?',
+      [String(body.vehiculoId), req.usuario.sub]
+    );
     if (!v) fail(404, 'El vehiculoId indicado no existe', { vehiculoId: body.vehiculoId });
 
     db.run(
@@ -152,8 +162,14 @@ router.post('/ordenes', (req, res) => {
 });
 
 /* ============================ PUT /ordenes/:id ========================== */
-router.put('/ordenes/:id', (req, res) => {
-  const orden = db.getOne('SELECT * FROM ordenes_trabajo WHERE id = ?', [req.params.id]);
+/* C4: la orden se resuelve vía JOIN con su vehículo — si el vehículo es de
+   otro taller, la orden "no existe" para este token (404, nunca 403). */
+router.put('/:id', (req, res) => {
+  const orden = db.getOne(
+    'SELECT o.* FROM ordenes_trabajo o JOIN vehiculos v ON v.id = o.vehiculo_id' +
+    ' WHERE o.id = ? AND v.usuario_id = ?',
+    [req.params.id, req.usuario.sub]
+  );
   if (!orden) fail(404, 'Orden de trabajo no encontrada');
 
   const body = req.body || {};
@@ -203,8 +219,13 @@ router.put('/ordenes/:id', (req, res) => {
 });
 
 /* =========================== DELETE /ordenes/:id ======================== */
-router.delete('/ordenes/:id', (req, res) => {
-  const orden = db.getOne('SELECT id FROM ordenes_trabajo WHERE id = ?', [req.params.id]);
+/* C4: misma resolución por JOIN que el PUT (ajeno ⇒ 404). */
+router.delete('/:id', (req, res) => {
+  const orden = db.getOne(
+    'SELECT o.id FROM ordenes_trabajo o JOIN vehiculos v ON v.id = o.vehiculo_id' +
+    ' WHERE o.id = ? AND v.usuario_id = ?',
+    [req.params.id, req.usuario.sub]
+  );
   if (!orden) fail(404, 'Orden de trabajo no encontrada');
 
   db.tx(function () {
@@ -214,4 +235,4 @@ router.delete('/ordenes/:id', (req, res) => {
   res.status(204).send();
 });
 
-module.exports = router;
+module.exports = { router: router, routerVehiculos: routerVehiculos };

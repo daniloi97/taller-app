@@ -1,9 +1,9 @@
 # TALLER MECÁNICO · HISTORIA CLÍNICA VEHICULAR
 # Documentación Técnica Oficial y Manual de Arquitectura
 
-> **Versión del documento:** 1.0 (25/10/2026) — consolidada sobre el commit de
-> Fase 4b (`e82dfcb`). Documento generado por auditoría de la base de código:
-> **no modifica la aplicación**, describe su estado real.
+> **Versión del documento:** 2.0 (26/10/2026) — consolidada sobre el commit de
+> Fase 5 (hardening de seguridad). Documento generado por auditoría de la base
+> de código: **no modifica la aplicación**, describe su estado real.
 
 ---
 
@@ -147,8 +147,9 @@ bloquear la escritura del mostrador.
 | Columna | Tipo | Restricciones | Notas |
 |---|---|---|---|
 | `id` | VARCHAR(36) | PK | **UUID v4 sintética** generada en la APP antes del INSERT |
+| `usuario_id` | VARCHAR(36) | — | **Fase 5 · C4**: taller dueño de la ficha (multi-tenant). Filas legadas migradas al primer usuario |
 | `nombre` | VARCHAR(120) | NOT NULL | |
-| `dni` | VARCHAR(20) | NOT NULL, CHECK(`<>''`), **UNIQUE `idx_clientes_dni`** | dato de BÚSQUEDA, no de referencia |
+| `dni` | VARCHAR(20) | NOT NULL, CHECK(`<>''`), **UNIQUE `idx_clientes_usuario_dni` `(usuario_id, dni)`** | dato de BÚSQUEDA, no de referencia; único POR taller |
 | `telefono` | VARCHAR(30) | — | |
 | `email` | VARCHAR(140) | — | |
 | `fecha_alta` | DATE | NOT NULL, DEFAULT `CURRENT_DATE` | |
@@ -157,7 +158,8 @@ bloquear la escritura del mostrador.
 | Columna | Tipo | Restricciones | Notas |
 |---|---|---|---|
 | `id` | VARCHAR(36) | PK | UUID sintética |
-| `patente` | VARCHAR(12) | NOT NULL, **UNIQUE `idx_vehiculos_patente`** | normalizada `AB123CD` (mayúsc, sin signos) |
+| `usuario_id` | VARCHAR(36) | — | **Fase 5 · C4**: taller dueño (multi-tenant), índice B-Tree `idx_vehiculos_usuario` |
+| `patente` | VARCHAR(12) | NOT NULL, **UNIQUE `idx_vehiculos_usuario_patente` `(usuario_id, patente)`** | normalizada `AB123CD` (mayúsc, sin signos); única POR taller |
 | `marca` / `modelo` | VARCHAR(60)/(80) | NOT NULL DEFAULT `'Sin marca'`/`'Sin modelo'` | alta desde escáner sin leer bien el resto |
 | `anio` | INTEGER | CHECK NULL ó 1900–2100 | |
 | `km` | INTEGER | CHECK NULL ó ≥0 | **odómetro monotónico**: el API sólo actualiza si km nuevo > guardado |
@@ -193,7 +195,7 @@ NUMERIC(12,2) ≥0 default 0.
 | Columna | Tipo | Restricciones | Notas |
 |---|---|---|---|
 | `id` | VARCHAR(36) | PK | el JWT lleva `sub = id` |
-| `telefono` | VARCHAR(30) | **UNIQUE `idx_usuarios_telefono`**, CHECK (`telefono IS NOT NULL OR email IS NOT NULL`) | clave del canal OTP; formato API `549XXXXXXXXXX` *(13 dígitos: `+54 9` + código de área 2 + número 8, sin el 0 ni el 15)* |
+| `telefono` | VARCHAR(30) | **UNIQUE `idx_usuarios_telefono`**, CHECK (`telefono IS NOT NULL OR email IS NOT NULL`) | clave del canal OTP; SÓLO dígitos (sin `+`, Fase 5 · W4) — `+54911…` y `54911…` son la misma cuenta. El front normaliza a `549` + 10; backend tolera 8..15 dígitos |
 | `email` | VARCHAR(140) | **UNIQUE `idx_usuarios_email`** | UNIQUE admite varios NULL |
 | `password_hash` | VARCHAR(255) | — | **scrypt** nativo: salt 16B aleatoria + dk 64B, formato `scrypt$<salt>$<dk>`; JAMÁS texto claro |
 | `nombre` / `apellido` | VARCHAR(80) | (Fase 4) identidad personal: **obligatorios** en el registro, editables en perfil | |
@@ -259,20 +261,29 @@ Todos los nombres en **camelCase** en respuesta vía `utils/camel.js`
   reexportado en `module.exports` — lo consumen `server.js` y rutas):
   `Authorization: Bearer <token>` → 401 `{NO_AUTORIZADO}` si falta / venció /
   firma inválida / payload manipulado.
-- **Las rutas de negocio montan `proteger`**: clientes y vehiculos directo;
-  en `server.js` un comodín de path (`/ordenes|/vehiculos…`) protege el router
-  de órdenes sin robar las 404 públicas (QA: `/auth/inventado → 404`, no 401).
-- En **producción sin `JWT_SECRET` el server no arranca** (fail-closed);
-  desarrollo usa un secreto de desarrollo con AVISO en consola.
+- **Autenticación global deny-by-default (Fase 5 · C3)**: `server.js` monta
+  `proteger` como frontera GLOBAL bajo `/api/v1` — arriba sólo quedan `/health`
+  y `/auth` (público por diseño, sus rutas privadas ya llevan `proteger`).
+  Sin listas de rutas ni distinción de mayúsculas: cualquier ruta conocida o
+  desconocida bajo la frontera responde 401 (QA: `/auth/inventado → 401`,
+  `/ORDENES` en mayúsculas → 401 — el comodín viejo por `indexOf` se eliminó).
+- **Secreto JWT fail-closed (Fase 5 · C1)**: `JWT_SECRET` es obligatorio salvo
+  con `NODE_ENV=development` EXACTO — caso en el que se genera una clave
+  aleatoria EFÍMERA (`crypto.randomBytes(48)`) y nunca un secreto escrito en
+  el repo. Con `NODE_ENV` ausente, `production` o cualquier otro valor el
+  server NO arranca (`process.exit(1)`); ídem si el secreto definido tiene
+  menos de 32 caracteres o contiene "cambiar"/"changeme".
 
 **Teléfonos Argentina (+54 9)**
 - **Front** (regla estricta): widget de prefijo fijo **+54 9** (no editable),
   input de exactamente **10 dígitos**, leyenda *"código de área, sin el 0 y
   sin el 15 (ej: 1123456789)"*, rechazo de dígitos repetidos
   (`/^(\d)\1{9}$/`) y normalización a **`549` + 10** antes de llamar a la API.
-- **Backend** (defensivo, tolerante): `normalizarTelefono` (sólo dígitos y
-  `+`) + `telefonoValido` (**8..15 dígitos**). Guarda el formato que llega
-  (el registro por front envía `549…`).
+- **Backend** (defensivo, tolerante): `normTelefono` (**SÓLO dígitos** — el
+  `+` también se elimina, Fase 5 · W4) + `telefonoValido` (**8..15
+  dígitos**). Guarda la forma normalizada: `+54911…` y `54911…` llegan a la
+  MISMA clave de cuenta (sin duplicados ni bypass de la cuota OTP; la
+  migración limpia los `+` ya guardados).
 
 **Política de contraseñas**
 - Mínimo **6 caracteres** (`PASSWORD_MIN = 6`) en backend y front
@@ -284,7 +295,8 @@ Todos los nombres en **camelCase** en respuesta vía `utils/camel.js`
   **OTP de WhatsApp** (con el mismo anti-spam).
 
 **Sanitización / normalización compartida** (`utils/normalizar.js`)
-- `normDni` → sólo dígitos · `normPatente` → mayúsculas + alfanumérico.
+- `normDni` → sólo dígitos · `normPatente` → mayúsculas + alfanumérico ·
+  `normTelefono` → sólo dígitos (sin `+`, Fase 5 · W4).
 - `fechaISOoNada` (400 si mal formada) · `enteroOoNada` · `monto0` (≥0, cents).
 
 ### 4.2 Catálogo de Endpoints
@@ -297,50 +309,61 @@ existe · **409** conflicto (duplicado / claves UNIQUE / FK) · **429** límite
 #### `GET /api/v1/health` — público (sin auth)
 | Códigos | Descripción |
 |---|---|
-| 200 | `{ok, driver, db (solo dev), consultable}` — en producción NO filtra la ruta de la BD |
+| 200 · 503 | `{ok: true}` — cuerpo mínimo (Fase 5 · C3: SIN driver ni ruta de la BD); 503 `{ok: false}` si la base no responde |
+
+**Nota Fase 5 · C2 (códigos de prueba)**: los campos `dev.otp` / `dev.token` /
+`dev.enlace` y los logs de mock (`WHATSAPP-MOCK`, `EMAIL-MOCK`) sólo aparecen
+con la DOBLE llave `NODE_ENV=development` + `DEV_EXPOSE_CODES=true`. Sin ella
+las respuestas no exponen códigos y la consola queda muda (ver `.env.example`).
 
 #### `/auth/*` — sesión y credenciales (público salvo /profile)
 | Método | Ruta | Auth | Body · Parámetros | Respuestas | Descripción funcional |
 |---|---|---|---|---|---|
-| POST | `/auth/request-otp` | — | `{ telefono }` (8–15 dígitos) | 200 · 400 · 429 | Envía OTP de 6 dígitos por WhatsApp **mock** (consola + `dev.otp` en dev). Anti-spam 30 s (REENVIO_MS), cuota **2/mes** · 429 con mensaje según tenga email vinculado ("Utiliza la recuperación por email") o no (soporte). |
+| POST | `/auth/request-otp` | — | `{ telefono }` (8–15 dígitos) | 200 · 400 · 429 | Envía OTP de 6 dígitos por WhatsApp **mock** (consola + `dev.otp` SOLO con `DEV_EXPOSE_CODES=true`). Anti-spam 30 s (REENVIO_MS), cuota **2/mes** · 429 con mensaje según tenga email vinculado ("Utiliza la recuperación por email") o no (soporte). |
 | POST | `/auth/verify-otp` | — | `{ telefono, otp, password?, nombreTaller?, nombre?, apellido? }` | 200 · 400 · 409 | One-shot (5 intentos, quema el código). UPSERT por teléfono: crea cuenta nueva o consolida datos (Fase 4: nombre/apellido via `COALESCE`). Devuelve `{token, usuario}`. |
 | POST | `/auth/register` | — | `{ metodo:'email', email, password, nombre*, apellido*, nombreTaller? }` → **alta inmediata** | **201** + token · 400 · 409 duplicado | Registro dual rama email. nombre/apellido **obligatorios** (≤80). 409 con mensaje amigable de duplicado (`CONFLICTO_DATOS`). |
-| POST | `/auth/register` | — | `{ metodo:'telefono', telefono, password, nombre*, apellido*, nombreTaller? }` → **prueba de propiedad OTP** | **200** `{necesitaVerificacion, dev.otp}` · 400 · 409 duplicado | Envia OTP y el front cierra el registro con `verify-otp` (mando password + identidad). |
+| POST | `/auth/register` | — | `{ metodo:'telefono', telefono, password, nombre*, apellido*, nombreTaller? }` → **prueba de propiedad OTP** | **200** `{necesitaVerificacion, dev.otp?}` · 400 · 409 duplicado | Envia OTP y el front cierra el registro con `verify-otp` (mando password + identidad). `dev.otp` SOLO con `DEV_EXPOSE_CODES=true`. |
 | POST | `/auth/login` | — | `{ email, password }` | 200 · 400 · **401** · **403 `{forceReset}`** | Email + contraseña. 401 inexistente: `"Usuario no registrado o contraseña incorrecta."`; contraseña errada: contador `"Intentos restantes: n"`. Al 3er fallo: 403 fuerza el reset (se abre automáticamente en el front). |
 | GET | `/auth/profile` | proteger | — | 200 · 401 | ficha pública: identidad personal (nombre/apellido), email, teléfono, cuota OTP, createdAt. |
-| PUT | `/auth/profile` | proteger | `{ nombre?, apellido?, email?, telefono?, nombreTaller? }` | 200 · 400 · 409 | Edita (uno o varios campos; vacío no borra por accidente). **Cambio de teléfono → re-firma el token** (el JWT lo lleva en payload). 409 en email/tel ya usados. |
-| POST | `/auth/olvide-password` | — | `{ email }` | 200 (siempre) · 400 | Token de 24B hex 15 min via restablecer por email (mock→consola+`dev.token`). **No enumera** cuentas (responde igual si no existe). |
+| PUT | `/auth/profile` | proteger | `{ nombre?, apellido?, email?, telefono?, nombreTaller?, passwordActual? }` | 200 · **403** · 400 · 409 | Edita (uno o varios campos; vacío no borra por accidente). **REAUTENTICACIÓN (Fase 5 · C5)**: cambiar `email` o `telefono` exige `passwordActual` verificada (scrypt) — sin ella (o errada) responde **403** `REAUTENTICACION` "Confirmá tu contraseña actual para cambiar email o teléfono" ANTES de validar formato/unicidad; cuentas OTP-only (sin contraseña) verifican con `otpActual` (OTP pedido a su propio teléfono). Cambio de teléfono → re-firma el token. 409 en email/tel ya usados. |
+| POST | `/auth/olvide-password` | — | `{ email }` | 200 (siempre) · 400 | Token de 24B hex 15 min via restablecer por email (mock→consola+`dev.token` con `DEV_EXPOSE_CODES`). **No enumera** cuentas (responde igual si no existe). El log del mock registra el `usuario.id`, jamás el email (PII, Fase 5 · C2). |
 | POST | `/auth/reset-password` | — | `{ via:'otp', telefono, otp, password }` | 200 · 400 | Reset por OTP (respeta anti-spam/cuota) — limpia `intentos_fallidos`. |
 | | | | `{ via:'token', token, password }` | 200 · 400 | Reset por token 15 min one-shot — limpia `intentos_fallidos`. |
-| POST | `/auth/request-password-reset-email` | **proteger** | — | 200 · 400 · 401 | Fase 3: genera ENLACE de cambio (mock→consola+`dev.enlace`; llama al front `#reset-password?token=…`). 400 si la cuenta no tiene email vinculado (sugiere perfil). |
+| POST | `/auth/request-password-reset-email` | **proteger** | — | 200 · 400 · 401 | Fase 3: genera ENLACE de cambio (mock→consola+`dev.enlace` con `DEV_EXPOSE_CODES`; llama al front `#reset-password?token=…`). 400 si la cuenta no tiene email vinculado (sugiere perfil). Log sin email/PII (C2). |
 | POST | `/auth/confirm-password-reset` | — | `{ token, newPassword }` | 200 · 400 | Consume el enlace one-shot (mismo motor que el reset por token). |
 
-#### `/clientes/*` (protected: `auth.proteger`)
-| Método | Ruta | Body · Parámetros | Respuestas | Descripción funcional |
-|---|---|---|---|---|
-| GET | `/clientes` | query `dni?` | 200 | Lista (`vehiculosActivos` subconsulta, sin N+1) o filtra por DNI exacto. |
-| GET | `/clientes/:id` | — | 200 · 404 | Ficha (con subconsultas agregadas). |
-| POST | `/clientes` | `{ nombre, dni, telefono?, email? }` | **201** · 400 · 409 DNI | Alta (+ `Location` header). DNI único. |
-| PUT | `/clientes/:id` | `{ nombre?, telefono?, email? }` | 200 · 400 · 404 | Edita parcial (sin tocar DNI). |
-| DELETE | `/clientes/:id` | — | 200 `{mensaje, vehiculosSinTitular}` · 404 | baja amarilla: FK SET NULL — cuenta cuántos vehículos quedaron sin titular. |
+#### `/clientes/*` (protected: `auth.proteger` — frontera GLOBAL de server.js)
 
-#### `/vehiculos/*` (protected)
+**Aislamiento multi-tenant (Fase 5 · C4): TODAS las consultas filtran
+`usuario_id = req.usuario.sub` (el taller extraído del JWT). Un cliente ajeno
+existe pero "no está": responde 404, nunca 403 (sin oráculos de enumeración).
+El índice `idx_clientes_usuario_dni` UNIQUE (usuario_id, dni) reemplaza al
+global: dos talleres pueden cargar el mismo DNI; dentro del taller es único.**
 | Método | Ruta | Body · Parámetros | Respuestas | Descripción funcional |
 |---|---|---|---|---|
-| GET | `/vehiculos` | query `patente?` `sin_titular?` `clienteId?` `estado?` | 200 · 400 estado | Búsqueda por patente (normalizada) / lista vehículos sin titular (soporte del escáner ALPR) / estado `activo|historico`. |
-| GET | `/vehiculos/:id` | — | 200 · 404 | Ficha compuesta: titular + historialDuenos + `cantidad_servicios`. |
-| POST | `/vehiculos` | `{ patente, marca?, …, modo: 'clienteId' \| 'nuevoCliente' \| 'sinTitular' }` | **201** · 400 · 409 patente | Alta en 3 modos: cliente existente / alta-inline **reutilizando** cliente si DNI existe / "Propietario desconocido". |
+| GET | `/clientes` | query `dni?` | 200 | Lista (`vehiculosActivos` subconsulta, sin N+1) o filtra por DNI exacto — sólo clientes del taller. |
+| GET | `/clientes/:id` | — | 200 · 404 | Ficha (con subconsultas agregadas). Ajeno → 404. |
+| POST | `/clientes` | `{ nombre, dni, telefono?, email? }` | **201** · 400 · 409 DNI (por taller) | Alta (+ `Location` header). DNI único EN EL taller (UNIQUE compuesto). |
+| PUT | `/clientes/:id` | `{ nombre?, telefono?, email? }` | 200 · 400 · 404 | Edita parcial (sin tocar DNI). Ajeno → 404. |
+| DELETE | `/clientes/:id` | — | 200 `{mensaje, vehiculosSinTitular}` · 404 | baja amarilla: FK SET NULL — cuenta cuántos vehículos quedaron sin titular. Ajeno → 404. |
+
+#### `/vehiculos/*` (protected — mismo aislamiento C4: `usuario_id = sub`, ajeno → 404)
+| Método | Ruta | Body · Parámetros | Respuestas | Descripción funcional |
+|---|---|---|---|---|
+| GET | `/vehiculos` | query `patente?` `sin_titular?` `clienteId?` `estado?` | 200 · 400 estado | Búsqueda por patente (normalizada, única POR taller) / lista vehículos sin titular (soporte del escáner ALPR) / estado `activo|historico`. |
+| GET | `/vehiculos/:id` | — | 200 · 404 | Ficha compuesta: titular (del propio taller) + historialDuenos + `cantidad_servicios`. |
+| POST | `/vehiculos` | `{ patente, marca?, …, modo: 'clienteId' \| 'nuevoCliente' \| 'sinTitular' }` | **201** · 400 · 404 · 409 patente (por taller) | Alta en 3 modos: cliente existente DEL taller (ajeno → 404) / alta-inline **reutilizando** cliente del taller si DNI existe / "Propietario desconocido". |
 | PUT | `/vehiculos/:id` | `{ marca?, modelo?, anio?, color?, km?, motor? }` | 200 · 400 · 404 | Edita parcial (km validado ≥0; el odómetro monotónico lo gobiernan las ORDENES). |
-| POST | `/vehiculos/:id/transferir` | `{ destino: 'nuevoClienteId' \| 'nuevoCliente' \| 'sinTitular' }` | 200 · 400 · 404 | Transferencia: cierra el período del dueño saliente en `historial_duenos` (snapshot), abre el nuevo; puede quedar sin titular. `estado='historico'` al quedar sin dueño. |
+| POST | `/vehiculos/:id/transferir` | `{ destino: 'nuevoClienteId' \| 'nuevoCliente' \| 'sinTitular' }` | 200 · 400 · 404 | Transferencia: cierra el período del dueño saliente en `historial_duenos` (snapshot), abre el nuevo (cliente destino del propio taller); puede quedar sin titular. `estado='historico'` al quedar sin dueño. |
 | DELETE | `/vehiculos/:id` | — | 200 `{mensaje, filas}` · 404 | **Cascada completa**: historial + órdenes + tareas + repuestos. |
 
-#### `/ordenes/*` (protected — comodín path sobre el router raíz)
+#### `/ordenes/*` (protected — router montado bajo `/ordenes` + sub-router `/vehiculos/:vehiculoId/ordenes`)
 | Método | Ruta | Body · Parámetros | Respuestas | Descripción funcional |
 |---|---|---|---|---|
-| GET | `/vehiculos/:vehiculoId/ordenes` | — | 200 · 404 | Historial cronológico del vehículo con desglose O(n) de tareas + repuestos (3 consultas planas, sin N+1 ni roundtrips extra). |
-| POST | `/ordenes` | `{ vehiculoId, fecha?, km?, manoObra?, observaciones?, tareas: [{descripcion}], repuestos: [{nombre, cantidad, precioUnitario}] }` | **201** (+ `Location`) · 400 · 404 | **Transaccional** (`db.tx`): cabecera + N tareas + N repuestos en un solo bloque atómico; actualiza el odómetro monotónico del vehículo. |
-| PUT | `/ordenes/:id` | `{ fecha?, km?, manoObra?, observaciones?, tareas?, repuestos? }` | 200 · 400 · 404 | Reemplaza el desglose (reemplazo transaccional de detalle). |
-| DELETE | `/ordenes/:id` | — | **204** · 404 | Baja de orden (tareas+repuestos van con ella por CASCADE). |
+| GET | `/vehiculos/:vehiculoId/ordenes` | — | 200 · 404 | Historial cronológico del vehículo con desglose O(n) de tareas + repuestos (3 consultas planas, sin N+1 ni roundtrips extra). Vehículo ajeno → 404. |
+| POST | `/ordenes` | `{ vehiculoId, fecha?, km?, manoObra?, observaciones?, tareas: [{descripcion}], repuestos: [{nombre, cantidad, precioUnitario}] }` | **201** (+ `Location`) · 400 · 404 | **Transaccional** (`db.tx`): cabecera + N tareas + N repuestos en un solo bloque atómico; actualiza el odómetro monotónico del vehículo. `vehiculoId` ajeno → 404 (nunca permite crear ordenes sobre vehículos de otro taller). |
+| PUT | `/ordenes/:id` | `{ fecha?, km?, manoObra?, observaciones?, tareas?, repuestos? }` | 200 · 400 · 404 | Reemplaza el desglose (reemplazo transaccional de detalle). Orden resuelta por JOIN con su vehículo (`v.usuario_id = sub`): ajena → 404. |
+| DELETE | `/ordenes/:id` | — | **204** · 404 | Baja de orden (tareas+repuestos van con ella por CASCADE). Misma resolución por JOIN (C4). |
 
 *(Los 401 de todo el portafolio de negocio responden `NO_AUTORIZADO`; los 500
 nunca exponen stack — QA fase1 cubre los flujos token/OTP y algunos 400/401/404).*
@@ -516,8 +539,14 @@ Scheduler fuera del proceso Express.
 | **CORS** | reflexivo en dev; producción con lista explícita (fail-closed) |
 | **Fuerza bruta login** | contador `intentos_fallidos` — 3 errores → bloqueo + reset obligatorio |
 | **Costos SMS/abuso OTP** | cuota 2/mes + anti-spam 30 s + vida 5 min + 5 intentos del código |
-| **Enumeración de cuentas** | `/olvide-password` responde igual (200) exista o no; /login ya distingue inexistente (decisión de UX de la Fase 4b) |
-| **Secretos** | `.env` fuera del repo (`.gitignore`: `.env`, `.env.*`, `*.env`); `data/` y `*.sqlite*` también ignorados — la DB no se comitea jamás |
+| **Enumeración de cuentas** | `/olvide-password` responde igual (200) exista o no; /login ya distingue inexistente (decisión de UX de la Fase 4b); recursos de negocio ajenos → 404 (nunca 403, Fase 5 · C4) |
+| **Secreto JWT (C1)** | `JWT_SECRET` obligatorio salvo con `NODE_ENV=development` EXACTO (clave efímera `randomBytes(48)`); NODE_ENV ausente = estricto; secreto <32 chars o con "cambiar"/"changeme" → `process.exit(1)` (fail-closed) |
+| **Autorización global (C3)** | `proteger` montado como frontera GLOBAL bajo `/api/v1` (deny-by-default): rutas conocidas, desconocidas y en CUALQUIER mayúscula → 401; sólo `/health` y `/auth` quedan arriba. Eliminado el comodín viejo por `indexOf` (case-sensitive, con bypass) |
+| **Códigos de prueba (C2)** | `dev.otp`/`dev.token`/`dev.enlace` y los logs de mock SOLO con la doble llave `NODE_ENV=development` + `DEV_EXPOSE_CODES=true`; los logs de eventos ya no registran PII (el reset por enlace loguea `usuario.id`, no el email) |
+| **Multi-tenant (C4)** | `usuario_id` en clientes/vehiculos (+ migración idempotente con backfill al primer usuario); UNIQUE compuestos `(usuario_id, dni)` y `(usuario_id, patente)` reemplazan a los globales; toda query de negocio filtra por el taller del JWT (órdenes vía JOIN con su vehículo) |
+| **Reautenticación de identidad (C5)** | cambiar email o teléfono por `PUT /auth/profile` exige `passwordActual` verificada con scrypt (cuentas OTP-only: OTP propio) — 403 `REAUTENTICACION` ANTES de validar formato/unicidad (previene secuestro de cuenta con sesión viva) |
+| **Normalización de teléfonos (W4)** | `normTelefono` SÓLO dígitos (elimina el `+`): `+549…` y `549…` son la misma clave de cuenta — sin bypass de la cuota OTP ni duplicados; migración limpia los `+` en disco |
+| **Secretos / datos (W9)** | `.env.*` ignora todo salvo `!.env.example`; `*.db-journal/-wal/-shm`, dumps/backups (`*.dump`, `*.sql.gz`, `backup-*`), claves (`*.pem`, `*.key`, `*.crt`, `id_rsa*`…), `.npmrc`, `tools/`, `coverage/`, IDE — la DB y cualquier secreto no se comitean jamás |
 | **Errores 500** | no filtran stack al cliente (solo log del server); `SQLITE_*` traducidos a 400/409 específicos |
 | **Contraseñas** | scrypt + salt aleatorio por usuario; verificación en tiempo constante |
 | **JSON** | límite 200KB; 400 `JSON_INVALIDO` ante cuerpo roto |
@@ -535,7 +564,8 @@ Scheduler fuera del proceso Express.
 - [x] **Fase 3 — Confirmación + cambio por enlace**: confirmación de contraseña en el registro, ojo de visibilidad, restablecimiento por token email (one-shot 15 min) y por OTP de WhatsApp desde el perfil.
 - [x] **Fase 4 — Identidad personal + teléfono AR**: nombre/apellido obligatorios al registrarse y editables en el perfil; teléfono argentino con prefijo fijo +54 9, 10 dígitos exactos, sin repetidos y normalización `549…`; QA completo y E2E browser.
 - [x] **Fase 4b — Duplicados amigables**: 409 con mensaje único en registro (email/tel) + captura de violación UNIQUE (sin 500); login con mensaje de usuario inexistente.
-- [x] **QA automatizado**: 5 baterías API (35 + 42 + 18 + 27 + 17 checks) + 23 checks estáticos + E2E browser — **162 verificaciones verdes**.
+- [x] **Fase 5 — Hardening de seguridad (auditoría C1–C5, W4, W9)**: secreto JWT fail-closed + NODE_ENV estricto (C1); códigos de prueba tras doble llave `DEV_EXPOSE_CODES` y logs sin PII (C2); autenticación global deny-by-default bajo `/api/v1` — fin del comodín case-sensitive (C3); aislamiento multi-tenant por `usuario_id` con UNIQUE compuestos y migración idempotente (C4); reautenticación con contraseña al cambiar email/teléfono (C5); teléfonos normalizados sin `+` (W4); `.gitignore` completado con journals/dumps/claves (W9). Batería nueva `qa-seguridad-fase5.cjs` + E2E browser.
+- [x] **QA automatizado**: 6 baterías API (35 + 44 + 18 + 31 + 17 + **43** checks) + 23 checks estáticos + E2E browser — **211 verificaciones verdes**.
 - [x] **Seguridad base**: helmet, CORS fail-closed, parametrización SQL, XSS escape, gitignore a `.env`/`data`.
 
 ### 7.2 Integración pendiente ⚠
@@ -545,7 +575,9 @@ Scheduler fuera del proceso Express.
 - [ ] **PWA instalable** — service worker + `manifest.json` + cache de assets/`models/`: el diseño ya es ligero y el offline de los modelos local existe; falta la capa de instalación y el cacheo del shell.
 - [ ] **Persistencia de stores efímeros** — OTPs y tokens de reset viven en `Map` de RAM (se pierden al reiniciar — tolerable en dev). Migrar a tabla `otp_codigos` / Redis con TTL.
 - [ ] **PostgreSQL activo** — schema ya compatible; falta activar el adapter `pg` de `db.js` (placeholder `?` → `$n`, `tx` con client dedicado).
-- [ ] **Rate limit global** por IP (complemento del anti-spam de OTPs, p.ej. `express-rate-limit`) + registro de auditoría de autenticación.
+- [ ] **Rate limit global** por IP (complemento del anti-spam de OTPs, p.ej. `express-rate-limit`; auditoría W1) + registro de auditoría de autenticación.
+- [ ] **OTP de propiedad al NUEVO teléfono** — al cambiar teléfono en `PUT /auth/profile` la cuenta OTP-only verifica con un OTP de su teléfono VIEJO (acotado: la auditoría señala que la prueba de propiedad del número NUEVO queda como trabajo futuro; para cuentas con contraseña el C5 ya exige `passwordActual`).
+- [ ] **Verificación del email nuevo por SMTP** — al cambiar email en el perfil (C5) no se re-confirma la propiedad del buzón nuevo (hoy sólo exige contraseña; re-auth + confirmación pendiente de SMTP real).
 - [ ] **Tests de carga / WAL en volumen** — SQLite rinde cómodo hasta decenas de miles de filas; planear el punto de migración a PostgreSQL.
 
 ### 7.3 Estrategia de Hosting objetivo

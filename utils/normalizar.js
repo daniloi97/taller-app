@@ -15,6 +15,14 @@ function normPatente(valor) {
   return String(valor == null ? '' : valor).toUpperCase().replace(/[^0-9A-Z]/g, '');
 }
 
+/* Teléfono: SÓLO dígitos (Fase 5 · W4). El '+' se elimina también, así
+   '+5491123456789' y '5491123456789' llegan a la MISMA clave en usuarios:
+   sin variantes por separado, no hay bypass de la cuota OTP ni cuentas
+   duplicadas. La migración de db.js limpia los '+' ya guardados. */
+function normTelefono(valor) {
+  return String(valor == null ? '' : valor).replace(/\D/g, '');
+}
+
 /* Fecha de hoy en ISO 8601 (zona UTC del servidor, coherente con CURRENT_DATE) */
 function hoyISO() {
   return new Date().toISOString().slice(0, 10);
@@ -41,4 +49,4 @@ function monto0(valor) {
   return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) / 100 : 0;
 }
 
-module.exports = { normDni, normPatente, hoyISO, fechaISOoNada, enteroOoNada, monto0 };
+module.exports = { normDni, normPatente, normTelefono, hoyISO, fechaISOoNada, enteroOoNada, monto0 };

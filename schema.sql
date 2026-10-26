@@ -35,39 +35,49 @@
 BEGIN;
 
 -- ---------------------------------------------------------------------------
--- 1) CLIENTES — titulares y su dato de búsqueda (DNI único, no referencia)
+-- 1) CLIENTES — titulares y su dato de búsqueda (DNI único POR TALLER, no
+--    referencia). usuario_id (Fase 5 · C4): taller dueño de la ficha — el
+--    JWT trae el sub del usuario y TODAS las consultas de negocio filtran
+--    por acá (aislamiento multi-tenant: un taller jamás ve datos de otro).
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS clientes (
-  id         VARCHAR(36)  NOT NULL,
-  nombre     VARCHAR(120) NOT NULL,
-  dni        VARCHAR(20)  NOT NULL,
-  telefono   VARCHAR(30),
-  email      VARCHAR(140),
-  fecha_alta DATE         NOT NULL DEFAULT CURRENT_DATE,
+  id          VARCHAR(36)  NOT NULL,
+  usuario_id  VARCHAR(36),
+  nombre      VARCHAR(120) NOT NULL,
+  dni         VARCHAR(20)  NOT NULL,
+  telefono    VARCHAR(30),
+  email       VARCHAR(140),
+  fecha_alta  DATE         NOT NULL DEFAULT CURRENT_DATE,
   CONSTRAINT pk_clientes PRIMARY KEY (id),
   CONSTRAINT ck_clientes_dni CHECK (dni <> '')
 );
 
--- Búsqueda por DNI (reemplaza a la constraint UNIQUE inline; mismo efecto)
-CREATE UNIQUE INDEX IF NOT EXISTS idx_clientes_dni ON clientes (dni);
+-- Unicidad del DNI DENTRO del taller: UNIQUE (usuario_id, dni) reemplaza al
+-- global idx_clientes_dni — dos talleres pueden atender a la misma persona,
+-- pero dentro del mismo taller el DNI sigue siendo clave de búsqueda única
+-- (SQLite admite varios NULL de usuario_id: filas legadas a reasignar).
+-- índice B-Tree plano para los listados por taller.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_clientes_usuario_dni ON clientes (usuario_id, dni);
+CREATE INDEX IF NOT EXISTS idx_clientes_usuario ON clientes (usuario_id);
 
 -- ---------------------------------------------------------------------------
 -- 2) VEHÍCULOS — cliente_id NULL = "Propietario desconocido" (vehículo activo
 --    que puede recibir órdenes de trabajo sin titular asociado)
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS vehiculos (
-  id         VARCHAR(36)  NOT NULL,
-  patente    VARCHAR(12)  NOT NULL,
-  marca      VARCHAR(60)  NOT NULL DEFAULT 'Sin marca',
-  modelo     VARCHAR(80)  NOT NULL DEFAULT 'Sin modelo',
-  anio       INTEGER      CHECK (anio IS NULL OR (anio BETWEEN 1900 AND 2100)),
-  color      VARCHAR(40),
-  km         INTEGER      CHECK (km    IS NULL OR km    >= 0),
-  motor      VARCHAR(40),
-  cliente_id VARCHAR(36),
-  estado     VARCHAR(10)  NOT NULL DEFAULT 'activo'
-             CONSTRAINT ck_vehiculos_estado CHECK (estado IN ('activo', 'historico')),
-  fecha_alta DATE         NOT NULL DEFAULT CURRENT_DATE,
+  id          VARCHAR(36)  NOT NULL,
+  usuario_id  VARCHAR(36),
+  patente     VARCHAR(12)  NOT NULL,
+  marca       VARCHAR(60)  NOT NULL DEFAULT 'Sin marca',
+  modelo      VARCHAR(80)  NOT NULL DEFAULT 'Sin modelo',
+  anio        INTEGER      CHECK (anio IS NULL OR (anio BETWEEN 1900 AND 2100)),
+  color       VARCHAR(40),
+  km          INTEGER      CHECK (km    IS NULL OR km    >= 0),
+  motor       VARCHAR(40),
+  cliente_id  VARCHAR(36),
+  estado      VARCHAR(10)  NOT NULL DEFAULT 'activo'
+              CONSTRAINT ck_vehiculos_estado CHECK (estado IN ('activo', 'historico')),
+  fecha_alta  DATE         NOT NULL DEFAULT CURRENT_DATE,
   CONSTRAINT pk_vehiculos PRIMARY KEY (id),
   CONSTRAINT fk_vehiculos_cliente
     FOREIGN KEY (cliente_id) REFERENCES clientes (id)
@@ -75,8 +85,12 @@ CREATE TABLE IF NOT EXISTS vehiculos (
     ON UPDATE CASCADE
 );
 
--- Patente única (búsqueda por chapa)
-CREATE UNIQUE INDEX IF NOT EXISTS idx_vehiculos_patente ON vehiculos (patente);
+-- Patente única DENTRO del taller (búsqueda por chapa del escáner ALPR):
+-- UNIQUE (usuario_id, patente) reemplaza al idx_vehiculos_patente global.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_vehiculos_usuario_patente ON vehiculos (usuario_id, patente);
+
+-- Listados por taller (siempre el filtro base de cada query del negocio)
+CREATE INDEX IF NOT EXISTS idx_vehiculos_usuario ON vehiculos (usuario_id);
 
 -- Fichas por titular + borrosos rápidos al desafiliar
 CREATE INDEX IF NOT EXISTS idx_vehiculos_cliente_id ON vehiculos (cliente_id);
@@ -211,8 +225,10 @@ COMMIT;
 /* ============================================================================
    RESUMEN DE ÍNDICES B-TREE
    ----------------------------------------------------------------------------
-   idx_clientes_dni            UNIQUE — búsqueda de cliente por DNI
-   idx_vehiculos_patente       UNIQUE — búsqueda de chapa (escáner ALPR)
+   idx_clientes_usuario_dni    UNIQUE (usuario_id, dni) — DNI único POR TALLER
+   idx_vehiculos_usuario_patente UNIQUE (usuario_id, patente) — chapa POR TALLER
+   idx_clientes_usuario                 — listado del taller (C4)
+   idx_vehiculos_usuario                — listado del taller (C4)
    idx_vehiculos_cliente_id             — fichas por titular / SET NULL en FK
    idx_historial_duenos_vehiculo        — dueños del vehículo (FK CASCADE)
    idx_historial_duenos_cliente         — "autos que tuvo a su nombre"
@@ -222,9 +238,11 @@ COMMIT;
    idx_usuarios_telefono       UNIQUE — clave del canal OTP (WhatsApp)
    idx_usuarios_email          UNIQUE — clave del acceso email + contraseña
 
-   Los índices de patente/DNI se implementan como UNIQUE INDEX para cumplir
-   simultáneamente la restricción de unicidad y el nombre de índice pedido
-   (evita dos B-Tree redundantes sobre la misma columna).
+   La unicidad de DNI/patente es POR TALLER (usuario_id, col): el aislamiento
+   multi-tenant de la Fase 5 (C4) permite que dos talleres distintos carguen
+   la misma persona o la misma chapa sin conflicto, mientras dentro de cada
+   taller los datos de búsqueda siguen siendo únicos (los índices únicos por
+   columna reemplazan a los globales idx_clientes_dni / idx_vehiculos_patente).
 
    SIN INSERT: las tablas quedan creadas y vacías, listas para producción.
    ============================================================================ */
